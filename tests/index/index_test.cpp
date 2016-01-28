@@ -106,9 +106,9 @@ TEST(IndexTests, BtreeIndexTest) {
   index->InsertEntry(key3, item1);
   index->InsertEntry(key4, item1);
 
-  auto locations = index->Scan(keynonce);
+  auto locations = index->ScanKey(keynonce);
   EXPECT_EQ(locations.size(), 0);
-  locations = index->Scan(key0);
+  locations = index->ScanKey(key0);
   EXPECT_EQ(locations.size(), 1);
 
   // EXPECT_EQ(location.block, item0.block);
@@ -121,13 +121,13 @@ TEST(IndexTests, BtreeIndexTest) {
   index->DeleteEntry(key3, item1);
   index->DeleteEntry(key4, item1);
 
-  locations = index->Scan(key0);
+  locations = index->ScanKey(key0);
   EXPECT_EQ(locations.size(), 0);
 
-  locations = index->Scan(key1);
+  locations = index->ScanKey(key1);
   EXPECT_EQ(locations.size(), 2);
 
-  locations = index->Scan(key2);
+  locations = index->ScanKey(key2);
   EXPECT_EQ(locations.size(), 1);
 
   // EXPECT_EQ(location.block, INVALID_OID);
