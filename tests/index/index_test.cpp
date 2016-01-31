@@ -24,17 +24,14 @@ namespace test {
 // Index Tests
 //===--------------------------------------------------------------------===//
 
-void PrintSlots(const std::vector<ItemPointer> &slots) {
-  std::cout << "SLOTS :: " << slots.size() << "\n";
-  for (auto item : slots) std::cout << item.block << " " << item.offset << "\n";
-}
+catalog::Schema *key_schema = nullptr;
+catalog::Schema *tuple_schema = nullptr;
 
-TEST(IndexTests, BtreeIndexTest) {
+index::Index *BuildIndex() {
+  // Build tuple and key schema
   std::vector<std::vector<std::string>> column_names;
   std::vector<catalog::Column> columns;
   std::vector<catalog::Schema *> schemas;
-
-  // SCHEMA
 
   catalog::Column column1(VALUE_TYPE_INTEGER, GetTypeSize(VALUE_TYPE_INTEGER),
                           "A", true);
@@ -47,25 +44,35 @@ TEST(IndexTests, BtreeIndexTest) {
   columns.push_back(column1);
   columns.push_back(column2);
 
-  catalog::Schema *key_schema = new catalog::Schema(columns);
+  // INDEX KEY SCHEMA -- {column1, column2}
+  key_schema = new catalog::Schema(columns);
   key_schema->SetIndexedColumns({0, 1});
 
   columns.push_back(column3);
   columns.push_back(column4);
 
-  catalog::Schema *tuple_schema = new catalog::Schema(columns);
+  // TABLE SCHEMA -- {column1, column2, column3, column4}
+ tuple_schema = new catalog::Schema(columns);
 
-  // BTREE Multi INDEX
-  bool unique_keys = false;
+  // Build index metadata
+  const bool unique_keys = false;
 
   index::IndexMetadata *index_metadata = new index::IndexMetadata(
       "btree_index", 125, INDEX_TYPE_BTREE, INDEX_CONSTRAINT_TYPE_DEFAULT,
       tuple_schema, key_schema, unique_keys);
+
+  // Build index
+  index::Index *index = index::IndexFactory::GetInstance(index_metadata);
+  EXPECT_TRUE(index != NULL);
+
+  return index;
+}
+
+
+TEST(IndexTests, BtreeIndexTest) {
   auto pool = TestingHarness::GetInstance().GetTestingPool();
 
-  index::Index *index = index::IndexFactory::GetInstance(index_metadata);
-
-  EXPECT_EQ(true, index != NULL);
+  std::unique_ptr<index::Index> index(BuildIndex());
 
   // INDEX
 
@@ -140,8 +147,6 @@ TEST(IndexTests, BtreeIndexTest) {
   delete keynonce;
 
   delete tuple_schema;
-
-  delete index;
 }
 
 }  // End test namespace
