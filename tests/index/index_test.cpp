@@ -330,12 +330,12 @@ TEST(IndexTests, MultiThreadedTest) {
 
   locations = index->Scan({key1->GetValue(0), key1->GetValue(1)},
                           {0, 1},
-                          {EXPRESSION_TYPE_COMPARE_EQUAL, EXPRESSION_TYPE_COMPARE_LESSTHAN});
+                          {EXPRESSION_TYPE_COMPARE_EQUAL, EXPRESSION_TYPE_COMPARE_GREATERTHAN});
   EXPECT_EQ(locations.size(), 1 * num_threads);
 
   locations = index->Scan({key1->GetValue(0), key1->GetValue(1)},
                           {0, 1},
-                          {EXPRESSION_TYPE_COMPARE_LESSTHAN, EXPRESSION_TYPE_COMPARE_EQUAL});
+                          {EXPRESSION_TYPE_COMPARE_GREATERTHAN, EXPRESSION_TYPE_COMPARE_EQUAL});
   EXPECT_EQ(locations.size(), 0);
 
   delete tuple_schema;
