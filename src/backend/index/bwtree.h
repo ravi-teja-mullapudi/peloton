@@ -23,9 +23,43 @@ namespace index {
 // peloton/third_party/stx/btree.h
 template <typename KeyType, typename ValueType, class KeyComparator>
 class BWTree {
-  typedef unsigned int PID;
+public:
+  // TODO: pass a settings structure as we go along instead of
+  // passing in individual parameter values
+  BWTree(const KeyComparator& _key_comp) : m_key_less(_key_comp) {
+    // Initialize an empty tree
+    m_root = nullptr;
+  }
 
- private:
+  ~BWTree() {
+    // TODO cleanup
+  }
+
+  bool insert(__attribute__((unused)) const KeyType& key,
+              __attribute__((unused)) const ValueType& value) {
+    /* TODO */
+    return true;
+  }
+
+  bool exists(__attribute__((unused)) const KeyType& key) {
+    /* TODO*/
+    return true;
+  }
+
+  bool erase(__attribute__((unused)) const KeyType& key,
+             __attribute__((unused)) const ValueType& value) {
+    /* TODO */
+    return true;
+  }
+
+  std::vector<ValueType> find(__attribute__((unused)) const KeyType& key) {
+    std::vector<ValueType> values;
+    return values;
+  }
+
+private:
+  using PID = uint32_t;
+
   constexpr static PID NotExistantPID = std::numeric_limits<PID>::max();
   constexpr static unsigned int max_table_size = 1 << 24;
 
@@ -33,7 +67,8 @@ class BWTree {
   // and the index in the Bw Tree. Currently only adding node types for
   // supporting splits.
   // TODO: more node types to be added for merging
-  enum PageType : unsigned char {
+
+  enum PageType {
     leaf,
     inner,
     deltaInsert,
@@ -44,41 +79,41 @@ class BWTree {
   };
 
   class BwNode {
-   public:
+  public:
     PageType type;
     BwNode(PageType _type) : type(_type) {}
   };
 
   class BwDeltaNode: public BwNode {
-   public:
+  public:
     PID base_node;
     BwDeltaNode(PageType _type, PID _base_node) : BwNode(_type) {
-        base_node = _base_node;
+      base_node = _base_node;
     }
   };
 
   class BwDeltaDeleteNode: public BwDeltaNode {
-   public:
+  public:
     std::pair<KeyType, ValueType> del_record;
     BwDeltaDeleteNode(PID _base_node, std::pair<KeyType, ValueType> _del_record)
-        : BwDeltaNode(PageType::deltaDelete, _base_node) {
-        del_record = _del_record;
+      : BwDeltaNode(PageType::deltaDelete, _base_node) {
+      del_record = _del_record;
     }
   };
 
   class BwDeltaInsertNode: public BwDeltaNode {
-   public:
+  public:
     std::pair<KeyType, ValueType> ins_record;
     BwDeltaInsertNode(PID _base_node, std::pair<KeyType, ValueType> _ins_record)
-        : BwDeltaNode(PageType::deltaInsert, _base_node) {
-        ins_record = _ins_record;
+      : BwDeltaNode(PageType::deltaInsert, _base_node) {
+      ins_record = _ins_record;
     }
   };
 
   class BwInnerNode : public BwNode {
     // Contains guide post keys for pointing to the right PID when search
     // for a key in the index
-   public:
+  public:
     // Elastic container to allow for separation of consolidation, splitting
     // and merging
     std::vector<std::pair<KeyType, PID> > separators;
@@ -88,7 +123,7 @@ class BWTree {
   class BwLeafNode : public BwNode {
     // Lowest level nodes in the tree which contain the payload/value
     // corresponding to the keys
-   public:
+  public:
     // Elastic container to allow for separation of consolidation, splitting
     // and merging
     std::vector<std::pair<KeyType, ValueType> > data;
@@ -153,39 +188,6 @@ class BWTree {
   void mergeInnerNode(void);
   void mergeLeafNode(void);
 
- public:
-  // TODO: pass a settings structure as we go along instead of
-  // passing in individual parameter values
-  BWTree(const KeyComparator& _key_comp) : m_key_less(_key_comp) {
-    // Initialize an empty tree
-    m_root = nullptr;
-  }
-
-  ~BWTree() {
-    // TODO cleanup
-  }
-
-  bool insert(__attribute__((unused)) const KeyType& key,
-              __attribute__((unused)) const ValueType& value) {
-    /* TODO */
-    return true;
-  }
-
-  bool exists(__attribute__((unused)) const KeyType& key) {
-    /* TODO*/
-    return true;
-  }
-
-  bool erase(__attribute__((unused)) const KeyType& key,
-             __attribute__((unused)) const ValueType& value) {
-    /* TODO */
-    return true;
-  }
-
-  std::vector<ValueType> find(__attribute__((unused)) const KeyType& key) {
-      std::vector<ValueType> values;
-      return values;
-  }
 };
 
 }  // End index namespace
