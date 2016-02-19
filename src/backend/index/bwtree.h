@@ -25,7 +25,7 @@ template <typename KeyType, typename ValueType, class KeyComparator>
 class BWTree {
   typedef unsigned int PID;
 
- public:
+ private:
   constexpr static PID NotExistantPID = std::numeric_limits<PID>::max();
   constexpr static unsigned int max_table_size = 1 << 24;
 
@@ -58,6 +58,8 @@ class BWTree {
     // Contains guide post keys for pointing to the right PID when search
     // for a key in the index
    public:
+    // Elastic container to allow for separation of consolidation, splitting
+    // and merging
     std::vector<std::pair<KeyType, PID> > separators;
     BwInnerNode(PID _next) : BwNode(PageType::inner, _next) {}
   };
@@ -66,6 +68,8 @@ class BWTree {
     // Lowest level nodes in the tree which contain the payload/value
     // corresponding to the keys
    public:
+    // Elastic container to allow for separation of consolidation, splitting
+    // and merging
     std::vector<std::pair<KeyType, ValueType> > data;
     BwLeafNode(PID _next) : BwNode(PageType::leaf, _next) {}
 
@@ -86,14 +90,24 @@ class BWTree {
   // like declaring a static array
   // TODO: Maybe replace with a static array
   std::vector<std::atomic<BwNode*> > mapping_table{max_table_size};
-  BwNode* root;
+
+  BwNode* m_root;
   // KeyComparator key_comp;
 
+  // Internal functions to be implemented
+  void consolidateLeafNode(void);
+  void consolidateInnerNode(void);
+  void splitInnerNode(void);
+  void splitLeafNode(void);
+  void mergeInnerNode(void);
+  void mergeLeafNode(void);
+
+ public:
   // TODO: pass a settings structure as we go along instead of
   // passing in individual parameter values
   BWTree() {
-    // Create an empty inner node for root
-    root = new BwInnerNode(NotExistantPID);
+    // Initialize an empty tree
+    m_root = nullptr;
   }
 };
 
