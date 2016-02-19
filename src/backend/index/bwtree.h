@@ -154,6 +154,11 @@ class BWTree {
     /* TODO */
     return true;
   }
+
+  std::vector<ValueType> find(__attribute__((unused)) const KeyType& key) {
+      std::vector<ValueType> values;
+      return values;
+  }
 };
 
 }  // End index namespace

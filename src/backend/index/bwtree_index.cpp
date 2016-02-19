@@ -61,6 +61,7 @@ bool BWTreeIndex<KeyType, ValueType, KeyComparator,
   {
     index_lock.WriteLock();
 
+    // Erase the key, val pair
     container.erase(index_key, location);
 
     index_lock.Unlock();
@@ -98,9 +99,10 @@ template <typename KeyType, typename ValueType, class KeyComparator,
           class KeyEqualityChecker>
 std::vector<ItemPointer>
 BWTreeIndex<KeyType, ValueType, KeyComparator, KeyEqualityChecker>::ScanKey(
-    __attribute__((unused)) const storage::Tuple *key) {
-  std::vector<ItemPointer> result;
-  // Add your implementation here
+    const storage::Tuple *key) {
+  KeyType index_key;
+  index_key.SetFromKey(key);
+  std::vector<ItemPointer> result = container.find(index_key);
   return result;
 }
 
