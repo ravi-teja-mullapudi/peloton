@@ -73,17 +73,15 @@ class BWTree {
     std::vector<std::pair<KeyType, ValueType> > data;
     BwLeafNode(PID _next) : BwNode(PageType::leaf, _next) {}
 
-    /*
-    bool comp_data(const std::pair<KeyType, ValueType> &d1,
-                   const std::pair<KeyType, ValueType> &d2) {
-        return key_comp(d1.first, d2.first);
+    bool comp_data(const std::pair<KeyType, ValueType>& d1,
+                   const std::pair<KeyType, ValueType>& d2) {
+      return m_key_less(d1.first, d2.first);
     }
 
     // Check if a key exists in the node
     bool find(const KeyType& key) {
-        return std::binary_search(data.begin(), data.end(),
-                                  key, comp_data);
-    }*/
+      return std::binary_search(data.begin(), data.end(), key, comp_data);
+    }
   };
 
   // Note that this cannot be resized nor moved. So it is effectively
@@ -92,7 +90,33 @@ class BWTree {
   std::vector<std::atomic<BwNode*> > mapping_table{max_table_size};
 
   BwNode* m_root;
-  // KeyComparator key_comp;
+  const KeyComparator& m_key_less;
+
+  /// True if a < b ? "constructed" from m_key_less()
+  inline bool key_less(const KeyType& a, const KeyType b) const {
+    return m_key_less(a, b);
+  }
+
+  /// True if a <= b ? constructed from key_less()
+  inline bool key_lessequal(const KeyType& a, const KeyType& b) const {
+    return !m_key_less(b, a);
+  }
+
+  /// True if a > b ? constructed from key_less()
+  inline bool key_greater(const KeyType& a, const KeyType& b) const {
+    return m_key_less(b, a);
+  }
+
+  /// True if a >= b ? constructed from key_less()
+  inline bool key_greaterequal(const KeyType& a, const KeyType& b) const {
+    return !m_key_less(a, b);
+  }
+
+  /// True if a == b ? constructed from key_less(). This requires the <
+  /// relation to be a total order, otherwise the B+ tree cannot be sorted.
+  inline bool key_equal(const KeyType& a, const KeyType& b) const {
+    return !m_key_less(a, b) && !m_key_less(b, a);
+  }
 
   // Internal functions to be implemented
   void consolidateLeafNode(void);
@@ -105,9 +129,30 @@ class BWTree {
  public:
   // TODO: pass a settings structure as we go along instead of
   // passing in individual parameter values
-  BWTree() {
+  BWTree(const KeyComparator& _key_comp) : m_key_less(_key_comp) {
     // Initialize an empty tree
     m_root = nullptr;
+  }
+
+  ~BWTree() {
+    // TODO cleanup
+  }
+
+  bool insert(__attribute__((unused)) const KeyType& key,
+              __attribute__((unused)) const ValueType& value) {
+    /* TODO */
+    return true;
+  }
+
+  bool exists(__attribute__((unused)) const KeyType& key) {
+    /* TODO*/
+    return true;
+  }
+
+  bool erase(__attribute__((unused)) const KeyType& key,
+             __attribute__((unused)) const ValueType& value) {
+    /* TODO */
+    return true;
   }
 };
 
