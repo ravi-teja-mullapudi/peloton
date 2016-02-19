@@ -27,6 +27,7 @@ class BWTree {
 
  public:
   constexpr static PID NotExistantPID = std::numeric_limits<PID>::max();
+  constexpr static unsigned int max_table_size = 1 << 24;
 
   // Enumeration of the types of nodes required in updating both the values
   // and the index in the Bw Tree. Currently only adding node types for
@@ -84,7 +85,7 @@ class BWTree {
   // Note that this cannot be resized nor moved. So it is effectively
   // like declaring a static array
   // TODO: Maybe replace with a static array
-  std::vector<std::atomic<BwNode*> > mapping_table{1 << 24};
+  std::vector<std::atomic<BwNode*> > mapping_table{max_table_size};
   BwNode* root;
   // KeyComparator key_comp;
 
