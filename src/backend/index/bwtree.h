@@ -63,16 +63,6 @@ private:
   constexpr static PID NotExistantPID = std::numeric_limits<PID>::max();
   constexpr static unsigned int max_table_size = 1 << 24;
 
-  // TODO: Add a global garbage vector per epoch using a lock
-
-  // Note that this cannot be resized nor moved. So it is effectively
-  // like declaring a static array
-  // TODO: Maybe replace with a static array
-  std::vector<std::atomic<BwNode*> > mapping_table{max_table_size};
-
-  BwNode* m_root;
-  const KeyComparator& m_key_less;
-
   // Enumeration of the types of nodes required in updating both the values
   // and the index in the Bw Tree. Currently only adding node types for
   // supporting splits.
@@ -192,6 +182,16 @@ private:
   void mergeInnerNode(void);
 
   void mergeLeafNode(void);
+
+  // TODO: Add a global garbage vector per epoch using a lock
+
+  // Note that this cannot be resized nor moved. So it is effectively
+  // like declaring a static array
+  // TODO: Maybe replace with a static array
+  std::vector<std::atomic<BwNode*> > mapping_table{max_table_size};
+
+  BwNode* m_root;
+  const KeyComparator& m_key_less;
 
 };
 
