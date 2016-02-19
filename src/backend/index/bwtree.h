@@ -46,12 +46,33 @@ class BWTree {
   class BwNode {
    public:
     PageType type;
-    // TODO : maybe we need to implement both a left and right pointer for
-    // now sticking with just next
-    // next can only be NotExistantPID when the PageType is leaf or
-    // inner and not root
-    PID next;
-    BwNode(PageType _type, PID _next) : type(_type), next(_next) {}
+    BwNode(PageType _type) : type(_type) {}
+  };
+
+  class BwDeltaNode: public BwNode {
+   public:
+    PID base_node;
+    BwDeltaNode(PageType _type, PID _base_node) : BwNode(_type) {
+        base_node = _base_node;
+    }
+  };
+
+  class BwDeltaDeleteNode: public BwDeltaNode {
+   public:
+    std::pair<KeyType, ValueType> del_record;
+    BwDeltaDeleteNode(PID _base_node, std::pair<KeyType, ValueType> _del_record)
+        : BwDeltaNode(PageType::deltaDelete, _base_node) {
+        del_record = _del_record;
+    }
+  };
+
+  class BwDeltaInsertNode: public BwDeltaNode {
+   public:
+    std::pair<KeyType, ValueType> ins_record;
+    BwDeltaInsertNode(PID _base_node, std::pair<KeyType, ValueType> _ins_record)
+        : BwDeltaNode(PageType::deltaInsert, _base_node) {
+        ins_record = _ins_record;
+    }
   };
 
   class BwInnerNode : public BwNode {
@@ -61,7 +82,7 @@ class BWTree {
     // Elastic container to allow for separation of consolidation, splitting
     // and merging
     std::vector<std::pair<KeyType, PID> > separators;
-    BwInnerNode(PID _next) : BwNode(PageType::inner, _next) {}
+    BwInnerNode(PID _next) : BwNode(PageType::inner) {}
   };
 
   class BwLeafNode : public BwNode {
@@ -71,8 +92,12 @@ class BWTree {
     // Elastic container to allow for separation of consolidation, splitting
     // and merging
     std::vector<std::pair<KeyType, ValueType> > data;
-    BwLeafNode(PID _next) : BwNode(PageType::leaf, _next) {}
-
+    BwLeafNode(PID _next) : BwNode(PageType::leaf) { next = _next; }
+    // TODO : maybe we need to implement both a left and right pointer for
+    // now sticking with just next
+    // next can only be NotExistantPID when the PageType is leaf or
+    // inner and not root
+    PID next;
     bool comp_data(const std::pair<KeyType, ValueType>& d1,
                    const std::pair<KeyType, ValueType>& d2) {
       return m_key_less(d1.first, d2.first);
@@ -83,6 +108,8 @@ class BWTree {
       return std::binary_search(data.begin(), data.end(), key, comp_data);
     }
   };
+
+  // TODO: Add a global garbage vector per epoch using a lock
 
   // Note that this cannot be resized nor moved. So it is effectively
   // like declaring a static array
