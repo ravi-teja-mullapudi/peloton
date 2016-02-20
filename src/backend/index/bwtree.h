@@ -146,23 +146,23 @@ class BWTree {
    public:
     // Elastic container to allow for separation of consolidation, splitting
     // and merging
+    BwInnerNode(PID _next)
+      : BwNode(PageType::inner),
+        next(_next) {}
+
+    PID next;
     std::vector<std::pair<KeyType, PID>> separators;
-    BwInnerNode(PID _next) : BwNode(PageType::inner) {}
   };
 
   class BwLeafNode : public BwNode {
     // Lowest level nodes in the tree which contain the payload/value
     // corresponding to the keys
    public:
-    // Elastic container to allow for separation of consolidation, splitting
-    // and merging
-    std::vector<std::pair<KeyType, ValueType>> data;
     BwLeafNode(PID _next) : BwNode(PageType::leaf) { next = _next; }
     // TODO : maybe we need to implement both a left and right pointer for
     // now sticking with just next
     // next can only be NONE_PID when the PageType is leaf or
     // inner and not root
-    PID next;
     bool comp_data(const std::pair<KeyType, ValueType>& d1,
                    const std::pair<KeyType, ValueType>& d2) {
       return m_key_less(d1.first, d2.first);
@@ -172,6 +172,11 @@ class BWTree {
     bool find(const KeyType& key) {
       return std::binary_search(data.begin(), data.end(), key, comp_data);
     }
+
+    PID next;
+    // Elastic container to allow for separation of consolidation, splitting
+    // and merging
+    std::vector<std::pair<KeyType, ValueType>> data;
   };
 
   /// True if a < b ? "constructed" from m_key_less()
