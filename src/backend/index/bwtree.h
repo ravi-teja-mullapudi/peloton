@@ -72,9 +72,9 @@ class BWTree {
     inner,
     deltaInsert,
     deltaDelete,
-    deltaIndex,
     deltaSplit,
-    deltaIndexEntry,
+    deltaIndexTermInsert,
+    deltaIndexTermDelete,
   };
 
   class BwNode {
@@ -117,18 +117,20 @@ class BWTree {
   class BwDeltaSplitNode : public BwDeltaNode {
    public:
     BwDeltaSplitNode(BwNode* _child_node, KeyType separator, PID split_sibling)
-        : BwDeltaNode(PageType::deltaInsert, _child_node),
+        : BwDeltaNode(PageType::deltaSplit, _child_node),
           separator_key(separator),
           split_sibling(split_sibling) {}
     KeyType separator_key;
     PID split_sibling;
   };
 
-  class BwDeltaIndexEntryNode : public BwDeltaNode {
+  class BwDeltaIndexTermInsertNode : public BwDeltaNode {
    public:
-    BwDeltaIndexEntryNode(BwNode* _child_node, KeyType new_split_separator_key,
-                          PID new_split_sibling, KeyType next_separator_key)
-        : BwDeltaNode(PageType::deltaInsert, _child_node),
+    BwDeltaIndexTermInsertNode(BwNode* _child_node,
+                               KeyType new_split_separator_key,
+                               PID new_split_sibling,
+                               KeyType next_separator_key)
+        : BwDeltaNode(PageType::deltaIndexTermInsert, _child_node),
           new_split_separator_key(new_split_separator_key),
           new_split_sibling(new_split_sibling),
           next_separator_key(next_separator_key) {}
@@ -146,9 +148,9 @@ class BWTree {
    public:
     // Elastic container to allow for separation of consolidation, splitting
     // and merging
-    BwInnerNode(PID _next)
-      : BwNode(PageType::inner),
-        next(_next) { next = _next; }
+    BwInnerNode(PID _next) : BwNode(PageType::inner), next(_next) {
+      next = _next;
+    }
 
     PID next;
     std::vector<std::pair<KeyType, PID>> separators;
@@ -205,26 +207,12 @@ class BWTree {
     return !m_key_less(a, b) && !m_key_less(b, a);
   }
 
-  bool isLeaf(BwNode* n) {
-    switch (n->type) {
-      case deltaDelete:
-      case deltaInsert:
-      case leaf:
-        return true;
-      case deltaSplit:
-      case deltaIndexSplit:
-      case deltaIndexTermInsert:
-      case deltaIndexTermDelete:
-        return false;
-      default:
-        assert(false);
-    }
-  }
-
   // Internal functions to be implemented
   bool consolidateLeafNode(PID id);
 
   bool consolidateInnerNode(PID id);
+
+  bool isLeaf(BwNode* n);
 
   PID findLeafPage(const KeyType& key);
 
@@ -247,6 +235,34 @@ class BWTree {
   BwNode* m_root;
   const KeyComparator& m_key_less;
 };
+
+}  // End index namespace
+}  // End peloton namespace
+
+// Template definitions
+#include <unordered_set>
+#include <cassert>
+
+namespace peloton {
+namespace index {
+
+// Add your function definitions here
+template <typename KeyType, typename ValueType, class KeyComparator>
+bool BWTree<KeyType, ValueType, KeyComparator>::isLeaf(BwNode* n) {
+  switch (n->type) {
+    case deltaDelete:
+    case deltaInsert:
+    case leaf:
+      return true;
+    case deltaSplit:
+    case deltaIndexTermInsert:
+    case deltaIndexTermDelete:
+    case inner:
+      return false;
+    default:
+      assert(false);
+  }
+}
 
 template <typename KeyType, typename ValueType, class KeyComparator>
 typename BWTree<KeyType, ValueType, KeyComparator>::PID
@@ -283,18 +299,6 @@ std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
   // Mark node for merge
   return values;
 }
-
-}  // End index namespace
-}  // End peloton namespace
-
-// Template definitions
-#include <unordered_set>
-#include <cassert>
-
-namespace peloton {
-namespace index {
-
-// Add your function definitions here
 
 template <typename KeyType, typename ValueType, class KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
