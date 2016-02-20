@@ -146,8 +146,9 @@ class BWTree {
    public:
     // Elastic container to allow for separation of consolidation, splitting
     // and merging
+    PID next;
     std::vector<std::pair<KeyType, PID>> separators;
-    BwInnerNode(PID _next) : BwNode(PageType::inner) {}
+    BwInnerNode(PID _next) : BwNode(PageType::inner) { next = _next; }
   };
 
   class BwLeafNode : public BwNode {
@@ -204,9 +205,9 @@ class BWTree {
     switch (n->type) {
       case deltaDelete:
       case deltaInsert:
-      case deltaSplit:
       case leaf:
         return true;
+      case deltaSplit:
       case deltaIndexSplit:
       case deltaIndex:
         return false;
@@ -259,18 +260,17 @@ std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
 
   // Check if the node is a leaf node
   BwNode* curr_node = mapping_table[leaf_page].load();
-  assert(isLeaf(node));
+  assert(isLeaf(curr_node));
 
   // Check if the node is marked for consolidation, splitting or merging
-  BwNode* next_node = nullptr;
+  // BwNode* next_node = nullptr;
   while (curr_node != nullptr) {
-      if (curr_node->type == PageType::leaf) {
-      } else (curr_node->type == PageType::splitLeafNode) {
-      } else (curr_node->type == PageType::deltaInsert) {
-      } else (curr_node->type == PageType::deltaDelete) {
-      } else {
-          assert(false);
-      }
+    if (curr_node->type == PageType::leaf) {
+    } else if (curr_node->type == PageType::deltaInsert) {
+    } else if (curr_node->type == PageType::deltaDelete) {
+    } else {
+      assert(false);
+    }
   }
 
   // Mark node for consolidation
