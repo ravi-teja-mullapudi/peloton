@@ -15,6 +15,7 @@
 #include <vector>
 #include <atomic>
 #include <algorithm>
+#include <cassert>
 
 namespace peloton {
 namespace index {
@@ -23,7 +24,7 @@ namespace index {
 // peloton/third_party/stx/btree.h
 template <typename KeyType, typename ValueType, class KeyComparator>
 class BWTree {
-public:
+ public:
   // TODO: pass a settings structure as we go along instead of
   // passing in individual parameter values
   BWTree(const KeyComparator& _key_comp) : m_key_less(_key_comp) {
@@ -52,12 +53,9 @@ public:
     return true;
   }
 
-  std::vector<ValueType> find(__attribute__((unused)) const KeyType& key) {
-    std::vector<ValueType> values;
-    return values;
-  }
+  std::vector<ValueType> find(const KeyType& key);
 
-private:
+ private:
   using PID = uint32_t;
 
   constexpr static PID NotExistantPID = std::numeric_limits<PID>::max();
@@ -79,33 +77,33 @@ private:
   };
 
   class BwNode {
-  public:
+   public:
     PageType type;
     BwNode(PageType _type) : type(_type) {}
   };
 
-  class BwDeltaNode: public BwNode {
-  public:
+  class BwDeltaNode : public BwNode {
+   public:
     PID base_node;
     BwDeltaNode(PageType _type, PID _base_node) : BwNode(_type) {
       base_node = _base_node;
     }
   };
 
-  class BwDeltaDeleteNode: public BwDeltaNode {
-  public:
+  class BwDeltaDeleteNode : public BwDeltaNode {
+   public:
     std::pair<KeyType, ValueType> del_record;
     BwDeltaDeleteNode(PID _base_node, std::pair<KeyType, ValueType> _del_record)
-      : BwDeltaNode(PageType::deltaDelete, _base_node) {
+        : BwDeltaNode(PageType::deltaDelete, _base_node) {
       del_record = _del_record;
     }
   };
 
-  class BwDeltaInsertNode: public BwDeltaNode {
-  public:
+  class BwDeltaInsertNode : public BwDeltaNode {
+   public:
     std::pair<KeyType, ValueType> ins_record;
     BwDeltaInsertNode(PID _base_node, std::pair<KeyType, ValueType> _ins_record)
-      : BwDeltaNode(PageType::deltaInsert, _base_node) {
+        : BwDeltaNode(PageType::deltaInsert, _base_node) {
       ins_record = _ins_record;
     }
   };
@@ -113,7 +111,7 @@ private:
   class BwInnerNode : public BwNode {
     // Contains guide post keys for pointing to the right PID when search
     // for a key in the index
-  public:
+   public:
     // Elastic container to allow for separation of consolidation, splitting
     // and merging
     std::vector<std::pair<KeyType, PID> > separators;
@@ -123,7 +121,7 @@ private:
   class BwLeafNode : public BwNode {
     // Lowest level nodes in the tree which contain the payload/value
     // corresponding to the keys
-  public:
+   public:
     // Elastic container to allow for separation of consolidation, splitting
     // and merging
     std::vector<std::pair<KeyType, ValueType> > data;
@@ -170,10 +168,27 @@ private:
     return !m_key_less(a, b) && !m_key_less(b, a);
   }
 
+  bool isLeaf(BwNode* n) {
+    switch (n->type) {
+      case deltaDelete:
+      case deltaInsert:
+      case deltaSplit:
+      case leaf:
+        return true;
+      case deltaSplitInner:
+      case deltaIndex:
+        return false;
+      default:
+        assert(false);
+    }
+  }
+
   // Internal functions to be implemented
   bool consolidateLeafNode(PID id);
 
   bool consolidateInnerNode(PID id);
+
+  PID findLeafPage(const KeyType& key);
 
   void splitInnerNode(void);
 
@@ -192,8 +207,32 @@ private:
 
   BwNode* m_root;
   const KeyComparator& m_key_less;
-
 };
+
+template <typename KeyType, typename ValueType, class KeyComparator>
+typename BWTree<KeyType, ValueType, KeyComparator>::PID
+BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(__attribute__((unused))
+                                                        const KeyType& key) {
+  return this->NotExistantPID;
+}
+
+template <typename KeyType, typename ValueType, class KeyComparator>
+std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
+    const KeyType& key) {
+  std::vector<ValueType> values;
+  // Find the leaf page the key can possibly map into
+  PID leaf_page = findLeafPage(key);
+  assert(leaf_page != this->NotExistantPID);
+
+  // Check if the node is a leaf node
+
+  // Check if the node is marked for consolidation, splitting or merging
+
+  // Mark node for consolidation
+  // Mark node for split
+  // Mark node for merge
+  return values;
+}
 
 }  // End index namespace
 }  // End peloton namespace

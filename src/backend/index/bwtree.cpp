@@ -12,7 +12,6 @@
 
 #include "backend/index/bwtree.h"
 #include <unordered_set>
-#include <cassert>
 
 namespace peloton {
 namespace index {
@@ -30,31 +29,29 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
   BwNode* node = original_node;
   while (node->type != leaf) {
     switch (node->type) {
-    case deltaInsert: {
-      BwDeltaInsertNode* insert_node =
-        static_cast<BwDeltaInsertNode*>(node);
-      // If we have a delete for this record, don't add
-      auto it = delete_records.find(insert_node->ins_record);
-      if (it != delete_records.end()) {
-        // Have existing delete record, get rid of it
-        delete_records.erase(it);
-      } else {
-        add_records.insert(insert_node->ins_record);
+      case deltaInsert: {
+        BwDeltaInsertNode* insert_node = static_cast<BwDeltaInsertNode*>(node);
+        // If we have a delete for this record, don't add
+        auto it = delete_records.find(insert_node->ins_record);
+        if (it != delete_records.end()) {
+          // Have existing delete record, get rid of it
+          delete_records.erase(it);
+        } else {
+          add_records.insert(insert_node->ins_record);
+        }
+        break;
       }
-      break;
-    }
-    case deltaDelete: {
-      BwDeltaDeleteNode* delete_node =
-        static_cast<BwDeltaDeleteNode*>(node);
-      delete_records.insert(delete_node->del_record);
-      break;
-    }
-    case deltaSplit: {
-      assert(false);
-      break;
-    }
-    default:
-      assert(false);
+      case deltaDelete: {
+        BwDeltaDeleteNode* delete_node = static_cast<BwDeltaDeleteNode*>(node);
+        delete_records.insert(delete_node->del_record);
+        break;
+      }
+      case deltaSplit: {
+        assert(false);
+        break;
+      }
+      default:
+        assert(false);
     }
 
     garbage_nodes.push_back(node);
@@ -66,7 +63,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
   if (node == nullptr) {
     // no leaf node
     consolidated_node = new BwLeafNode(0);
-    std::vector<std::pair<KeyType, ValueType> >& data = consolidated_node->data;
+    std::vector<std::pair<KeyType, ValueType>>& data = consolidated_node->data;
 
     // Delete records should be empty because there is nothing else to delete
     // at this point
@@ -78,7 +75,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
     BwLeafNode* leaf_node = static_cast<BwLeafNode*>(node);
 
     consolidated_node = new BwLeafNode(leaf_node->next);
-    std::vector<std::pair<KeyType, ValueType> >& data = consolidated_node->data;
+    std::vector<std::pair<KeyType, ValueType>>& data = consolidated_node->data;
 
     for (std::pair<KeyType, ValueType>& tuple : leaf_node->data) {
       auto it = delete_records.find(tuple);
@@ -98,8 +95,8 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
     std::sort(data.begin(), data.end());
   }
 
-  bool result =
-    mapping_table[id].compare_exchange_strong(original_node, consolidated_node);
+  bool result = mapping_table[id].compare_exchange_strong(original_node,
+                                                          consolidated_node);
   if (!result) {
     // Failed, cleanup
     delete consolidated_node;
