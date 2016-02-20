@@ -139,6 +139,24 @@ class BWTree {
     KeyType next_separator_key;
   };
 
+  class BwDeltaIndexTermDeleteNode : public BwDeltaNode {
+   public:
+    BwDeltaIndexTermDeleteNode(BwNode* _child_node,
+                               PID node_to_merge_into,
+                               PID node_to_remove,
+                               KeyType merge_node_low_key,
+                               KeyType remove_node_high_key)
+        : BwDeltaNode(PageType::deltaIndexTermDelete, _child_node),
+          node_to_merge_into(node_to_merge_into),
+          node_to_remove(node_to_remove),
+          merge_node_low_key(merge_node_low_key),
+          remove_node_high_key(remove_node_high_key) {}
+    PID node_to_merge_into;
+    PID node_to_remove;
+    KeyType merge_node_low_key;
+    KeyType remove_node_high_key;
+  };
+
   //===--------------------------------------------------------------------===//
   // Inner & leaf nodes
   //===--------------------------------------------------------------------===//
