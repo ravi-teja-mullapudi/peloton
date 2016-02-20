@@ -263,7 +263,7 @@ std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
 
   // Check if the node is marked for consolidation, splitting or merging
   BwNode* next_node = nullptr;
-  while (curr_node! = nullptr) {
+  while (curr_node != nullptr) {
       if (curr_node->type == PageType::leaf) {
       } else (curr_node->type == PageType::splitLeafNode) {
       } else (curr_node->type == PageType::deltaInsert) {
