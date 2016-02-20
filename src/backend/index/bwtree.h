@@ -27,7 +27,9 @@ class BWTree {
  public:
   // TODO: pass a settings structure as we go along instead of
   // passing in individual parameter values
-  BWTree(const KeyComparator& _key_comp) : m_key_less(_key_comp) {
+  BWTree(const KeyComparator& _key_comp)
+    : current_mapping_table_size(0),
+      m_key_less(_key_comp) {
     // Initialize an empty tree
     m_root = nullptr;
   }
@@ -203,6 +205,7 @@ class BWTree {
   // Note that this cannot be resized nor moved. So it is effectively
   // like declaring a static array
   // TODO: Maybe replace with a static array
+  size_t current_mapping_table_size;
   std::vector<std::atomic<BwNode*> > mapping_table{max_table_size};
 
   BwNode* m_root;
