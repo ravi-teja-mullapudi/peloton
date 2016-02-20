@@ -225,8 +225,20 @@ std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
   assert(leaf_page != this->NotExistantPID);
 
   // Check if the node is a leaf node
+  BwNode* curr_node = mapping_table[leaf_page].load();
+  assert(isLeaf(node));
 
   // Check if the node is marked for consolidation, splitting or merging
+  BwNode* next_node = nullptr;
+  while (curr_node! = nullptr) {
+      if (curr_node->type == PageType::leaf) {
+      } else (curr_node->type == PageType::splitLeafNode) {
+      } else (curr_node->type == PageType::deltaInsert) {
+      } else (curr_node->type == PageType::deltaDelete) {
+      } else {
+          assert(false);
+      }
+  }
 
   // Mark node for consolidation
   // Mark node for split
