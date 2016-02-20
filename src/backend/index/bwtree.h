@@ -79,8 +79,8 @@ class BWTree {
 
   class BwNode {
    public:
-    PageType type;
     BwNode(PageType _type) : type(_type) {}
+    PageType type;
   };
 
   //===--------------------------------------------------------------------===//
@@ -88,53 +88,53 @@ class BWTree {
   //===--------------------------------------------------------------------===//
   class BwDeltaNode : public BwNode {
    public:
-    BwNode* child_node;
     BwDeltaNode(PageType _type, BwNode* _child_node) : BwNode(_type) {
       child_node = _child_node;
     }
+    BwNode* child_node;
   };
 
   class BwDeltaInsertNode : public BwDeltaNode {
    public:
-    std::pair<KeyType, ValueType> ins_record;
     BwDeltaInsertNode(BwNode* _child_node,
                       std::pair<KeyType, ValueType> _ins_record)
         : BwDeltaNode(PageType::deltaInsert, _child_node) {
       ins_record = _ins_record;
     }
+    std::pair<KeyType, ValueType> ins_record;
   };
 
   class BwDeltaDeleteNode : public BwDeltaNode {
    public:
-    std::pair<KeyType, ValueType> del_record;
     BwDeltaDeleteNode(BwNode* _child_node,
                       std::pair<KeyType, ValueType> _del_record)
         : BwDeltaNode(PageType::deltaDelete, _child_node) {
       del_record = _del_record;
     }
+    std::pair<KeyType, ValueType> del_record;
   };
 
   class BwDeltaSplitNode : public BwDeltaNode {
    public:
-    KeyType separator_key;
-    PID split_sibling;
     BwDeltaSplitNode(BwNode* _child_node, KeyType separator, PID split_sibling)
         : BwDeltaNode(PageType::deltaInsert, _child_node),
           separator_key(separator),
           split_sibling(split_sibling) {}
+    KeyType separator_key;
+    PID split_sibling;
   };
 
   class BwDeltaIndexEntryNode : public BwDeltaNode {
    public:
-    KeyType new_split_separator_key;
-    PID new_split_sibling;
-    KeyType next_separator_key;
     BwDeltaIndexEntryNode(BwNode* _child_node, KeyType new_split_separator_key,
                           PID new_split_sibling, KeyType next_separator_key)
         : BwDeltaNode(PageType::deltaInsert, _child_node),
           new_split_separator_key(new_split_separator_key),
           new_split_sibling(new_split_sibling),
           next_separator_key(next_separator_key) {}
+    KeyType new_split_separator_key;
+    PID new_split_sibling;
+    KeyType next_separator_key;
   };
 
   //===--------------------------------------------------------------------===//
