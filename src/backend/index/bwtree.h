@@ -74,7 +74,7 @@ class BWTree {
     deltaDelete,
     deltaIndex,
     deltaSplit,
-    deltaIndexSplit,
+    deltaIndexEntry,
   };
 
   class BwNode {
@@ -124,17 +124,17 @@ class BWTree {
           split_sibling(split_sibling) {}
   };
 
-  class BwDeltaIndexSplitNode : public BwDeltaNode {
+  class BwDeltaIndexEntryNode : public BwDeltaNode {
    public:
-    KeyType split_separator_key;
+    KeyType new_split_separator_key;
     PID new_split_sibling;
-    KeyType sibling_separator_key;
-    BwDeltaIndexSplitNode(BwNode* _child_node, KeyType split_separator_key,
-                          PID new_split_sibling, KeyType sibling_separator_key)
+    KeyType next_separator_key;
+    BwDeltaIndexEntryNode(BwNode* _child_node, KeyType new_split_separator_key,
+                          PID new_split_sibling, KeyType next_separator_key)
         : BwDeltaNode(PageType::deltaInsert, _child_node),
-          split_separator_key(split_separator_key),
+          new_split_separator_key(new_split_separator_key),
           new_split_sibling(new_split_sibling),
-          sibling_separator_key(sibling_separator_key) {}
+          next_separator_key(next_separator_key) {}
   };
 
   //===--------------------------------------------------------------------===//
@@ -207,7 +207,7 @@ class BWTree {
       case deltaSplit:
       case leaf:
         return true;
-      case deltaIndexSplit:
+      case deltaIndexEntry:
       case deltaIndex:
         return false;
       default:
