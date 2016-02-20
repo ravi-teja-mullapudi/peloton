@@ -88,17 +88,18 @@ class BWTree {
   //===--------------------------------------------------------------------===//
   class BwDeltaNode : public BwNode {
    public:
-    PID base_node;
-    BwDeltaNode(PageType _type, PID _base_node) : BwNode(_type) {
-      base_node = _base_node;
+    BwNode* child_node;
+    BwDeltaNode(PageType _type, BwNode* _child_node) : BwNode(_type) {
+      child_node = _child_node;
     }
   };
 
   class BwDeltaInsertNode : public BwDeltaNode {
    public:
     std::pair<KeyType, ValueType> ins_record;
-    BwDeltaInsertNode(PID _base_node, std::pair<KeyType, ValueType> _ins_record)
-        : BwDeltaNode(PageType::deltaInsert, _base_node) {
+    BwDeltaInsertNode(BwNode* _child_node,
+                      std::pair<KeyType, ValueType> _ins_record)
+        : BwDeltaNode(PageType::deltaInsert, _child_node) {
       ins_record = _ins_record;
     }
   };
@@ -106,8 +107,9 @@ class BWTree {
   class BwDeltaDeleteNode : public BwDeltaNode {
    public:
     std::pair<KeyType, ValueType> del_record;
-    BwDeltaDeleteNode(PID _base_node, std::pair<KeyType, ValueType> _del_record)
-        : BwDeltaNode(PageType::deltaDelete, _base_node) {
+    BwDeltaDeleteNode(BwNode* _child_node,
+                      std::pair<KeyType, ValueType> _del_record)
+        : BwDeltaNode(PageType::deltaDelete, _child_node) {
       del_record = _del_record;
     }
   };
@@ -116,8 +118,8 @@ class BWTree {
    public:
     KeyType separator_key;
     PID split_sibling;
-    BwDeltaSplitNode(PID _base_node, KeyType separator, PID split_sibling)
-        : BwDeltaNode(PageType::deltaInsert, _base_node),
+    BwDeltaSplitNode(BwNode* _child_node, KeyType separator, PID split_sibling)
+        : BwDeltaNode(PageType::deltaInsert, _child_node),
           separator_key(separator),
           split_sibling(split_sibling) {}
   };
@@ -127,9 +129,9 @@ class BWTree {
     KeyType split_separator_key;
     PID new_split_sibling;
     KeyType sibling_separator_key;
-    BwDeltaSplitInnerNode(PID _base_node, KeyType split_separator_key,
+    BwDeltaSplitInnerNode(BwNode* _child_node, KeyType split_separator_key,
                           PID new_split_sibling, KeyType sibling_separator_key)
-        : BwDeltaNode(PageType::deltaInsert, _base_node),
+        : BwDeltaNode(PageType::deltaInsert, _child_node),
           split_separator_key(split_separator_key),
           new_split_sibling(new_split_sibling),
           sibling_separator_key(sibling_separator_key) {}
@@ -314,8 +316,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
     }
 
     garbage_nodes.push_back(node);
-    PID next_node_id = static_cast<BwDeltaNode*>(node)->base_node;
-    node = mapping_table[next_node_id];
+    node = static_cast<BwDeltaNode*>(node)->child_node;
   }
 
   BwLeafNode* consolidated_node;
