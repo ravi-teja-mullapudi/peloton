@@ -59,7 +59,7 @@ class BWTree {
  private:
   using PID = uint32_t;
 
-  constexpr static PID NotExistantPID = std::numeric_limits<PID>::max();
+  constexpr static PID NONE_PID = std::numeric_limits<PID>::max();
   constexpr static unsigned int max_table_size = 1 << 24;
 
   // Enumeration of the types of nodes required in updating both the values
@@ -160,7 +160,7 @@ class BWTree {
     BwLeafNode(PID _next) : BwNode(PageType::leaf) { next = _next; }
     // TODO : maybe we need to implement both a left and right pointer for
     // now sticking with just next
-    // next can only be NotExistantPID when the PageType is leaf or
+    // next can only be NONE_PID when the PageType is leaf or
     // inner and not root
     PID next;
     bool comp_data(const std::pair<KeyType, ValueType>& d1,
@@ -246,7 +246,7 @@ template <typename KeyType, typename ValueType, class KeyComparator>
 typename BWTree<KeyType, ValueType, KeyComparator>::PID
 BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(__attribute__((unused))
                                                         const KeyType& key) {
-  return this->NotExistantPID;
+  return this->NONE_PID;
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
@@ -255,7 +255,7 @@ std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
   std::vector<ValueType> values;
   // Find the leaf page the key can possibly map into
   PID leaf_page = findLeafPage(key);
-  assert(leaf_page != this->NotExistantPID);
+  assert(leaf_page != this->NONE_PID);
 
   // Check if the node is a leaf node
 
@@ -328,12 +328,14 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
 
     garbage_nodes.push_back(node);
     node = static_cast<BwDeltaNode*>(node)->child_node;
+    if (node == nullptr) break;
   }
 
   BwLeafNode* consolidated_node;
   if (node == nullptr) {
     // no leaf node
-    consolidated_node = new BwLeafNode(0);
+    assert(!has_split);
+    consolidated_node = new BwLeafNode(NONE_PID);
     std::vector<std::pair<KeyType, ValueType>>& data = consolidated_node->data;
 
     // Delete records should be empty because there is nothing else to delete
