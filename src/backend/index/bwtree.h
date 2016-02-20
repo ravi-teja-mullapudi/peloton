@@ -27,7 +27,8 @@ class BWTree {
  public:
   // TODO: pass a settings structure as we go along instead of
   // passing in individual parameter values
-  BWTree(const KeyComparator& _key_comp) : m_key_less(_key_comp) {
+  BWTree(const KeyComparator& _key_comp)
+      : current_mapping_table_size(0), m_key_less(_key_comp) {
     // Initialize an empty tree
     m_root = nullptr;
   }
@@ -82,39 +83,70 @@ class BWTree {
     BwNode(PageType _type) : type(_type) {}
   };
 
+  //===--------------------------------------------------------------------===//
+  // Delta chain nodes
+  //===--------------------------------------------------------------------===//
   class BwDeltaNode : public BwNode {
    public:
-    PID base_node;
-    BwDeltaNode(PageType _type, PID _base_node) : BwNode(_type) {
-      base_node = _base_node;
-    }
-  };
-
-  class BwDeltaDeleteNode : public BwDeltaNode {
-   public:
-    std::pair<KeyType, ValueType> del_record;
-    BwDeltaDeleteNode(PID _base_node, std::pair<KeyType, ValueType> _del_record)
-        : BwDeltaNode(PageType::deltaDelete, _base_node) {
-      del_record = _del_record;
+    BwNode* child_node;
+    BwDeltaNode(PageType _type, BwNode* _child_node) : BwNode(_type) {
+      child_node = _child_node;
     }
   };
 
   class BwDeltaInsertNode : public BwDeltaNode {
    public:
     std::pair<KeyType, ValueType> ins_record;
-    BwDeltaInsertNode(PID _base_node, std::pair<KeyType, ValueType> _ins_record)
-        : BwDeltaNode(PageType::deltaInsert, _base_node) {
+    BwDeltaInsertNode(BwNode* _child_node,
+                      std::pair<KeyType, ValueType> _ins_record)
+        : BwDeltaNode(PageType::deltaInsert, _child_node) {
       ins_record = _ins_record;
     }
   };
 
+  class BwDeltaDeleteNode : public BwDeltaNode {
+   public:
+    std::pair<KeyType, ValueType> del_record;
+    BwDeltaDeleteNode(BwNode* _child_node,
+                      std::pair<KeyType, ValueType> _del_record)
+        : BwDeltaNode(PageType::deltaDelete, _child_node) {
+      del_record = _del_record;
+    }
+  };
+
+  class BwDeltaSplitNode : public BwDeltaNode {
+   public:
+    KeyType separator_key;
+    PID split_sibling;
+    BwDeltaSplitNode(BwNode* _child_node, KeyType separator, PID split_sibling)
+        : BwDeltaNode(PageType::deltaInsert, _child_node),
+          separator_key(separator),
+          split_sibling(split_sibling) {}
+  };
+
+  class BwDeltaSplitInnerNode : public BwDeltaNode {
+   public:
+    KeyType split_separator_key;
+    PID new_split_sibling;
+    KeyType sibling_separator_key;
+    BwDeltaSplitInnerNode(BwNode* _child_node, KeyType split_separator_key,
+                          PID new_split_sibling, KeyType sibling_separator_key)
+        : BwDeltaNode(PageType::deltaInsert, _child_node),
+          split_separator_key(split_separator_key),
+          new_split_sibling(new_split_sibling),
+          sibling_separator_key(sibling_separator_key) {}
+  };
+
+  //===--------------------------------------------------------------------===//
+  // Inner & leaf nodes
+  //===--------------------------------------------------------------------===//
   class BwInnerNode : public BwNode {
     // Contains guide post keys for pointing to the right PID when search
     // for a key in the index
    public:
     // Elastic container to allow for separation of consolidation, splitting
     // and merging
-    std::vector<std::pair<KeyType, PID> > separators;
+    std::vector<std::pair<KeyType, PID>> separators;
     BwInnerNode(PID _next) : BwNode(PageType::inner) {}
   };
 
@@ -124,7 +156,7 @@ class BWTree {
    public:
     // Elastic container to allow for separation of consolidation, splitting
     // and merging
-    std::vector<std::pair<KeyType, ValueType> > data;
+    std::vector<std::pair<KeyType, ValueType>> data;
     BwLeafNode(PID _next) : BwNode(PageType::leaf) { next = _next; }
     // TODO : maybe we need to implement both a left and right pointer for
     // now sticking with just next
@@ -203,7 +235,8 @@ class BWTree {
   // Note that this cannot be resized nor moved. So it is effectively
   // like declaring a static array
   // TODO: Maybe replace with a static array
-  std::vector<std::atomic<BwNode*> > mapping_table{max_table_size};
+  size_t current_mapping_table_size;
+  std::vector<std::atomic<BwNode*>> mapping_table{max_table_size};
 
   BwNode* m_root;
   const KeyComparator& m_key_less;
@@ -270,8 +303,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
   while (node->type != leaf) {
     switch (node->type) {
       case deltaInsert: {
-        BwDeltaInsertNode* insert_node =
-          static_cast<BwDeltaInsertNode*>(node);
+        BwDeltaInsertNode* insert_node = static_cast<BwDeltaInsertNode*>(node);
         // If we have a delete for this record, don't add
         auto it = delete_records.find(insert_node->ins_record);
         if (it != delete_records.end()) {
@@ -283,8 +315,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
         break;
       }
       case deltaDelete: {
-        BwDeltaDeleteNode* delete_node =
-          static_cast<BwDeltaDeleteNode*>(node);
+        BwDeltaDeleteNode* delete_node = static_cast<BwDeltaDeleteNode*>(node);
         delete_records.insert(delete_node->del_record);
         break;
       }
@@ -297,8 +328,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
     }
 
     garbage_nodes.push_back(node);
-    PID next_node_id = static_cast<BwDeltaNode*>(node)->base_node;
-    node = mapping_table[next_node_id];
+    node = static_cast<BwDeltaNode*>(node)->child_node;
   }
 
   BwLeafNode* consolidated_node;
