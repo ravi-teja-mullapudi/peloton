@@ -171,9 +171,9 @@ private:
   }
 
   // Internal functions to be implemented
-  bool consolidateLeafNode(void);
+  bool consolidateLeafNode(PID id);
 
-  bool consolidateInnerNode(void);
+  bool consolidateInnerNode(PID id);
 
   void splitInnerNode(void);
 

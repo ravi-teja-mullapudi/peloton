@@ -12,6 +12,7 @@
 
 #include "backend/index/bwtree.h"
 #include <unordered_set>
+#include <cassert>
 
 namespace peloton {
 namespace index {
@@ -108,7 +109,8 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
   return result;
 }
 
-bool WTree::consolidateInnerNode(PID id) {
+template <typename KeyType, typename ValueType, class KeyComparator>
+bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(PID id) {
   return true;
 }
 
