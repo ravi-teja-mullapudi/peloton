@@ -28,9 +28,7 @@ class BWTree {
   // TODO: pass a settings structure as we go along instead of
   // passing in individual parameter values
   BWTree(const KeyComparator& _key_comp)
-      : current_mapping_table_size(0),
-        next_pid(0),
-        m_key_less(_key_comp) {
+      : current_mapping_table_size(0), next_pid(0), m_key_less(_key_comp) {
     // Initialize an empty tree
     m_root = this->NONE_PID;
   }
@@ -233,7 +231,7 @@ class BWTree {
   };
 
   /// True if a < b ? "constructed" from m_key_less()
-  inline bool key_less(const KeyType& a, const KeyType &b) const {
+  inline bool key_less(const KeyType& a, const KeyType& b) const {
     return m_key_less(a, b);
   }
 
@@ -285,23 +283,20 @@ class BWTree {
 
   void mergeLeafNode(void);
 
-  void assignPageId(BwNode *new_node_p);
+  PID installPage(BwNode* new_node_p);
 
   // This only applies to leaf node - For intermediate nodes
   // the insertion of sep/child pair must be done using different
   // insertion method
-  void installDeltaInsert(PID leaf_pid,
-                          const KeyType& key,
+  void installDeltaInsert(PID leaf_pid, const KeyType& key,
                           const ValueType& value);
 
   // TODO: Consider re-implement this using function
   // template (sacrifice readability)
-  void installDeltaModify(PID leaf_pid,
-                          const KeyType& key,
+  void installDeltaModify(PID leaf_pid, const KeyType& key,
                           const ValueType& value);
 
-  void installDeltaDelete(PID leaf_pid,
-                          const KeyType& key,
+  void installDeltaDelete(PID leaf_pid, const KeyType& key,
                           const ValueType& value);
 
   // TODO: Add a global garbage vector per epoch using a lock
@@ -340,24 +335,24 @@ namespace index {
  */
 template <typename KeyType, typename ValueType, class KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::isLeaf(BwNode* n) {
+
+  bool is_leaf = false;
   switch (n->type) {
     case deltaDelete:
     case deltaModify:
     case deltaInsert:
     case leaf:
-      return true;
+      is_leaf = true;
     case deltaSplit:
     case deltaIndexTermInsert:
     case deltaIndexTermDelete:
     case inner:
-      return false;
+      break;
     default:
       assert(false);
   }
 
-    // To make compiler happy.... Otherwise report error here
-    assert(false);
-    return false;
+  return is_leaf;
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
@@ -368,61 +363,59 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
   PID curr_pid = m_root;
   BwNode* curr_node = mapping_table[curr_pid].load();
   while (1) {
-      assert(curr_node != nullptr);
-      if (isLeaf(curr_node)) {
+    assert(curr_node != nullptr);
+    if (isLeaf(curr_node)) {
+      break;
+    } else if (curr_node->type == PageType::inner) {
+      BwInnerNode* inner_node = static_cast<BwInnerNode*>(curr_node);
+      assert(inner_node->separators.size() > 0);
+      for (int i = 1; i < inner_node->separators.size(); i++) {
+        if (key_less(inner_node->separators[i - 1].first, key) &&
+            key_less(inner_node->separators[i].first, key)) {
+          continue;
+        } else {
+          curr_pid = inner_node->separators[i - 1].second;
           break;
-      }
-      else if(curr_node->type == PageType::inner) {
-        BwInnerNode* inner_node = static_cast<BwInnerNode*>(curr_node);
-        assert(inner_node->separators.size() > 0);
-        for (int i = 1; i < inner_node->separators.size(); i++) {
-            if (key_less(inner_node->separators[i-1].first, key) &&
-                key_less(inner_node->separators[i].first, key)) {
-                continue;
-            } else {
-                curr_pid = inner_node->separators[i-1].second;
-                break;
-            }
         }
-        // Reach here if there is only one or the search reaches the node
-        curr_pid = inner_node->separators.back().second;
+      }
+      // Reach here if there is only one or the search reaches the node
+      curr_pid = inner_node->separators.back().second;
+      curr_node = mapping_table[curr_pid].load();
+      continue;
+
+    } else if (curr_node->type == PageType::deltaIndexTermInsert) {
+      BwDeltaIndexTermInsertNode* index_insert_node =
+          static_cast<BwDeltaIndexTermInsertNode*>(curr_node);
+      if (key_greater(key, index_insert_node->new_split_separator_key) &&
+          key_lessequal(key, index_insert_node->next_separator_key)) {
+        curr_pid = index_insert_node->new_split_sibling;
         curr_node = mapping_table[curr_pid].load();
         continue;
-
-      } else if(curr_node->type == PageType::deltaIndexTermInsert) {
-        BwDeltaIndexTermInsertNode * index_insert_node =
-                                static_cast<BwDeltaIndexTermInsertNode*>(curr_node);
-        if (key_greater(key, index_insert_node->new_split_separator_key) &&
-                key_lessequal(key, index_insert_node->next_separator_key)) {
-            curr_pid = index_insert_node->new_split_sibling;
-            curr_node = mapping_table[curr_pid].load();
-            continue;
-        }
-        curr_node = index_insert_node->child_node;
-
-      } else if(curr_node->type == PageType::deltaIndexTermDelete) {
-        BwDeltaIndexTermDeleteNode * index_delete_node =
-                                static_cast<BwDeltaIndexTermDeleteNode*>(curr_node);
-        if (key_greater(key, index_delete_node->merge_node_low_key) &&
-                key_lessequal(key, index_delete_node->remove_node_high_key)) {
-            curr_pid = index_delete_node->node_to_merge_into;
-            curr_node = mapping_table[curr_pid].load();
-            continue;
-        }
-        curr_node = index_delete_node->child_node;
-
-      } else if(curr_node->type == PageType::deltaSplit) {
-        BwDeltaSplitNode* split_node =
-                                static_cast<BwDeltaSplitNode*>(curr_node);
-          if (key_greater(key, split_node->separator_key)) {
-              curr_pid = split_node->split_sibling;
-              curr_node = mapping_table[curr_pid].load();
-              continue;
-          }
-          curr_node = split_node->child_node;
-      } else {
-          assert(false);
       }
+      curr_node = index_insert_node->child_node;
+
+    } else if (curr_node->type == PageType::deltaIndexTermDelete) {
+      BwDeltaIndexTermDeleteNode* index_delete_node =
+          static_cast<BwDeltaIndexTermDeleteNode*>(curr_node);
+      if (key_greater(key, index_delete_node->merge_node_low_key) &&
+          key_lessequal(key, index_delete_node->remove_node_high_key)) {
+        curr_pid = index_delete_node->node_to_merge_into;
+        curr_node = mapping_table[curr_pid].load();
+        continue;
+      }
+      curr_node = index_delete_node->child_node;
+
+    } else if (curr_node->type == PageType::deltaSplit) {
+      BwDeltaSplitNode* split_node = static_cast<BwDeltaSplitNode*>(curr_node);
+      if (key_greater(key, split_node->separator_key)) {
+        curr_pid = split_node->split_sibling;
+        curr_node = mapping_table[curr_pid].load();
+        continue;
+      }
+      curr_node = split_node->child_node;
+    } else {
+      assert(false);
+    }
   }
   return curr_pid;
 }
@@ -432,9 +425,7 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
  * the leaf node, and on its parent node
  */
 template <typename KeyType, typename ValueType, class KeyComparator>
-void BWTree<KeyType, ValueType, KeyComparator>::splitLeafNode(void) {
-
-}
+void BWTree<KeyType, ValueType, KeyComparator>::splitLeafNode(void) {}
 
 template <typename KeyType, typename ValueType, class KeyComparator>
 std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
@@ -638,10 +629,10 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
       case deltaIndexTermDelete: {
         BwDeltaIndexTermDeleteNode* delete_node =
             static_cast<BwDeltaIndexTermDeleteNode*>(node);
-        if (!has_split || key_less(delete_node->remove_node_low_key,
-                                   split_separator_key)) {
-          delete_separators.push_back({delete_node->remove_node_low_key,
-                                       delete_node->node_to_remove});
+        if (!has_split ||
+            key_less(delete_node->remove_node_low_key, split_separator_key)) {
+          delete_separators.push_back(
+              {delete_node->remove_node_low_key, delete_node->node_to_remove});
         }
         break;
       }
@@ -745,104 +736,94 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(PID id) {
   return true;
 }
 
-// This function will assign a page ID for a given page, and put that page into the
-// mapping table
+// This function will assign a page ID for a given page, and put that page into
+// the mapping table
 //
 // NOTE: This implementation referred to the Bw-Tree implementation on github:
 // >> https://github.com/flode/BwTree/blob/master/bwtree.hpp
 template <typename KeyType, typename ValueType, class KeyComparator>
-void BWTree<KeyType, ValueType, KeyComparator>::assignPageId(BwNode *new_node_p) {
-    // Let's assume first this will not happen; If it happens
-    // then we change this to a DEBUG output
-    // Need to use a variable length data structure
-    assert(next_pid < max_table_size);
+typename BWTree<KeyType, ValueType, KeyComparator>::PID
+BWTree<KeyType, ValueType, KeyComparator>::installPage(
+    BwNode* new_node_p) {
+  // Let's assume first this will not happen; If it happens
+  // then we change this to a DEBUG output
+  // Need to use a variable length data structure
+  assert(next_pid < max_table_size);
 
-    // Though it is operating on std::atomic<PID>, the ++ operation
-    // will be reflected to the underlying storage
-    // Also threads will be serialized here to get their own PID
-    // Once a PID is assigned, different pages on different slots will
-    // interfere with each other
-    PID assigned_pid = next_pid++;
-    mapping_table[assigned_pid] = new_node_p;
+  // Though it is operating on std::atomic<PID>, the ++ operation
+  // will be reflected to the underlying storage
+  // Also threads will be serialized here to get their own PID
+  // Once a PID is assigned, different pages on different slots will
+  // interfere with each other
+  PID assigned_pid = next_pid++;
+  mapping_table[assigned_pid] = new_node_p;
 
-    current_mapping_table_size++;
+  current_mapping_table_size++;
 
-    return;
+  return assigned_pid;
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::installDeltaInsert(
-    PID leaf_pid,
-    const KeyType& key,
-    const ValueType& value)
-{
-    // We could only use BwNode * since it is the
-    // type of mapping table
-    BwNode* old_leaf_p = mapping_table[leaf_pid].load();
+    PID leaf_pid, const KeyType& key, const ValueType& value) {
+  // We could only use BwNode * since it is the
+  // type of mapping table
+  BwNode* old_leaf_p = mapping_table[leaf_pid].load();
 
-    // We must be working on a leaf page
-    // This includes base page, delete page, insert page and modify page
-    assert(isLeaf(old_leaf_p));
+  // We must be working on a leaf page
+  // This includes base page, delete page, insert page and modify page
+  assert(isLeaf(old_leaf_p));
 
-    // Construct a new key-value pair and construct a new insert delta node
-    auto ins_record = std::pair<KeyType, ValueType>(key, value);
-    BwNode *new_leaf_p = (BwNode *)new BwDeltaInsertNode(old_leaf_p, ins_record);
+  // Construct a new key-value pair and construct a new insert delta node
+  auto ins_record = std::pair<KeyType, ValueType>(key, value);
+  BwNode* new_leaf_p = (BwNode*)new BwDeltaInsertNode(old_leaf_p, ins_record);
 
-    // Hook it into the mapping table
-    //assignPageId(new_leaf_p);
+  // If this fails we must keep trying
+  while (!mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p,
+                                                          new_leaf_p)) {
+    // In most cases it should not reach here. If it does
+    // then the leaf page has been changed, and in that case
+    // we just re-read the page and try again
+    old_leaf_p = mapping_table[leaf_pid].load();
+  }
 
-    // If this fails we must keep trying
-    while(!mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p,
-                                                           new_leaf_p)) {
-        // In most cases it should not reach here. If it does
-        // then the leaf page has been changed, and in that case
-        // we just re-read the page and try again
-        old_leaf_p = mapping_table[leaf_pid].load();
-    }
-
-    return;
+  return;
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::installDeltaModify(
-    PID leaf_pid,
-    const KeyType& key,
-    const ValueType& value)
-{
-    BwNode* old_leaf_p = mapping_table[leaf_pid].load();
-    assert(isLeaf(old_leaf_p));
+    PID leaf_pid, const KeyType& key, const ValueType& value) {
+  BwNode* old_leaf_p = mapping_table[leaf_pid].load();
+  assert(isLeaf(old_leaf_p));
 
-    auto modify_record = std::pair<KeyType, ValueType>(key, value);
-    BwNode *new_leaf_p = (BwNode *)new BwDeltaModifyNode(old_leaf_p, modify_record);
-    //assignPageId(new_leaf_p);
+  auto modify_record = std::pair<KeyType, ValueType>(key, value);
+  BwNode* new_leaf_p =
+      (BwNode*)new BwDeltaModifyNode(old_leaf_p, modify_record);
 
-    while(!mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p,
-                                                           new_leaf_p)) {
-        old_leaf_p = mapping_table[leaf_pid].load();
-    }
+  while (!mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p,
+                                                          new_leaf_p)) {
+    old_leaf_p = mapping_table[leaf_pid].load();
+  }
 
-    return;
+  return;
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::installDeltaDelete(
-    PID leaf_pid,
-    const KeyType& key,
-    const ValueType& value)
-{
-    BwNode* old_leaf_p = mapping_table[leaf_pid].load();
-    assert(isLeaf(old_leaf_p));
+    PID leaf_pid, const KeyType& key, const ValueType& value) {
+  BwNode* old_leaf_p = mapping_table[leaf_pid].load();
+  assert(isLeaf(old_leaf_p));
 
-    auto delete_record = std::pair<KeyType, ValueType>(key, value);
-    BwNode *new_leaf_p = (BwNode *)new BwDeltaDeleteNode(old_leaf_p, delete_record);
-    //assignPageId(new_leaf_p);
+  auto delete_record = std::pair<KeyType, ValueType>(key, value);
+  BwNode* new_leaf_p =
+      (BwNode*)new BwDeltaDeleteNode(old_leaf_p, delete_record);
 
-    while(!mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p,
-                                                           new_leaf_p)) {
-        old_leaf_p = mapping_table[leaf_pid].load();
-    }
+  while (!mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p,
+                                                          new_leaf_p)) {
+    old_leaf_p = mapping_table[leaf_pid].load();
+  }
 
-    return;
+  return;
 }
 
 }  // End index namespace
