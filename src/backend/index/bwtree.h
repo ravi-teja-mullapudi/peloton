@@ -141,10 +141,8 @@ class BWTree {
 
   class BwDeltaIndexTermDeleteNode : public BwDeltaNode {
    public:
-    BwDeltaIndexTermDeleteNode(BwNode* _child_node,
-                               PID node_to_merge_into,
-                               PID node_to_remove,
-                               KeyType merge_node_low_key,
+    BwDeltaIndexTermDeleteNode(BwNode* _child_node, PID node_to_merge_into,
+                               PID node_to_remove, KeyType merge_node_low_key,
                                KeyType remove_node_high_key)
         : BwDeltaNode(PageType::deltaIndexTermDelete, _child_node),
           node_to_merge_into(node_to_merge_into),
@@ -418,7 +416,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
       }
     }
     // This is not very efficient, but ok for now
-    std::sort(data.begin(), data.end());
+    std::sort(data.begin(), data.end(), BwLeafNode::comp_data);
   }
 
   bool result = mapping_table[id].compare_exchange_strong(original_node,
@@ -434,6 +432,99 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
 
 template <typename KeyType, typename ValueType, class KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(PID id) {
+  std::vector<std::pair<KeyType, PID>> insert_separators;
+  std::vector<std::pair<KeyType, PID>> delete_separators;
+
+  bool has_split = false;
+  KeyType split_separator_key;
+  PID new_sibling;
+
+  // Keep track of nodes so we can garbage collect later
+  std::vector<BwNode*> garbage_nodes;
+  BwNode* original_node = mapping_table[id].load();
+  BwNode* node = original_node;
+  while (node->type != inner) {
+    switch (node->type) {
+      case deltaSplit: {
+        // Our invariant is that split nodes always force a consolidate, so
+        // should be at the top
+        assert(node == original_node);  // Ensure the split is at the top
+        assert(!has_split);             // Ensure this is the only split
+        BwDeltaSplitNode* split_node = static_cast<BwDeltaSplitNode*>(node);
+        has_split = true;
+        split_separator_key = split_node->separator_key;
+        new_sibling = split_node->split_sibling;
+        break;
+      }
+      case deltaIndexTermInsert: {
+        BwDeltaIndexTermInsertNode* insert_node =
+            static_cast<BwDeltaIndexTermInsertNode*>(node);
+        if (!has_split || key_less(insert_node->new_split_separator_key,
+                                   split_separator_key)) {
+          insert_separators.push_back({insert_node->new_split_separator_key,
+                                       insert_node->new_split_sibling});
+        }
+        break;
+      }
+      case deltaIndexTermDelete: {
+        BwDeltaIndexTermDeleteNode* delete_node =
+            static_cast<BwDeltaIndexTermDeleteNode*>(node);
+        if (!has_split || key_less(delete_node->new_split_separator_key,
+                                   split_separator_key)) {
+          delete_separators.push_back({delete_node->new_split_separator_key,
+                                       delete_node->new_split_sibling});
+        }
+        break;
+      }
+      default:
+        assert(false);
+    }
+
+    garbage_nodes.push_back(node);
+    node = static_cast<BwDeltaNode*>(node)->child_node;
+  }
+
+  BwInnerNode* inner_node = static_cast<BwInnerNode*>(node);
+
+  BwInnerNode* consolidated_node;
+  typename std::vector<std::pair<KeyType, PID>>::iterator base_end;
+  if (has_split) {
+    // Find end of separators if split
+    base_end =
+        std::lower_bound(inner_node->separators.begin(),
+                         inner_node->separators.end(), split_separator_key,
+                         [=](const std::pair<KeyType, PID>& l, const KeyType& r)
+                             -> bool { return m_key_less(std::get<0>(l), r); });
+    consolidated_node = new BwInnerNode(new_sibling);
+  } else {
+    base_end = inner_node->separators.end();
+    consolidated_node = new BwInnerNode(inner_node->next);
+  }
+
+  std::vector<std::pair<KeyType, PID>>& separators =
+      consolidated_node->separators;
+  // Merge with difference
+  auto less_fn =
+      [=](const std::pair<KeyType, PID>& l, const std::pair<KeyType, PID>& r)
+          -> bool { return m_key_less(std::get<0>(l), std::get<0>(r)); };
+  // Not very efficient (difference and merge could be combined)
+  std::set_difference(inner_node->separators.begin(), base_end,
+                      delete_separators.begin(), delete_separators.end(),
+                      std::inserter(separators, separators.begin()), less_fn);
+  // Append sorted inserts to end
+  auto middle_it = separators.insert(
+      separators.end(), insert_separators.begin(), insert_separators.end());
+  // Merge the results together
+  std::inplace_merge(separators.begin(), middle_it, separators.end());
+
+  bool result = mapping_table[id].compare_exchange_strong(original_node,
+                                                          consolidated_node);
+  if (!result) {
+    // Failed, cleanup
+    delete consolidated_node;
+  } else {
+    // Succeeded, request garbage collection of processed nodes
+  }
   return true;
 }
 
