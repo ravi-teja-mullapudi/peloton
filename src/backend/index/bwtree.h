@@ -30,7 +30,7 @@ class BWTree {
   BWTree(const KeyComparator& _key_comp)
       : current_mapping_table_size(0), m_key_less(_key_comp) {
     // Initialize an empty tree
-    m_root = nullptr;
+    m_root = this->NONE_PID;
   }
 
   ~BWTree() {
@@ -248,7 +248,7 @@ class BWTree {
   size_t current_mapping_table_size;
   std::vector<std::atomic<BwNode*>> mapping_table{max_table_size};
 
-  BwNode* m_root;
+  PID m_root;
   const KeyComparator& m_key_less;
 };
 
@@ -282,9 +282,32 @@ bool BWTree<KeyType, ValueType, KeyComparator>::isLeaf(BwNode* n) {
 
 template <typename KeyType, typename ValueType, class KeyComparator>
 typename BWTree<KeyType, ValueType, KeyComparator>::PID
-BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(__attribute__((unused))
-                                                        const KeyType& key) {
-  return this->NONE_PID;
+BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
+  // Root should always have a valid pid
+  assert(m_root != this->NONE_PID);
+  PID curr_pid = m_root;
+  while (1) {
+      BwNode* curr_node = mapping_table[curr_pid].load();
+      assert(curr_node != nullptr);
+      if (isLeaf(curr_node)) {
+          break;
+      }
+      else if(curr_node->type == PageType::inner) {
+        BwInnerNode* inner_node = static_cast<BwInnerNode*>(curr_node);
+        auto sep_iter =
+        std::lower_bound(inner_node->separators.begin(),
+                         inner_node->separators.end(), key,
+                         [=](const std::pair<KeyType, PID>& l, const KeyType& r)
+                             -> bool { return m_key_less(std::get<0>(l), r); });
+        curr_pid = sep_iter->second;
+        continue;
+      } else if(curr_node->type == PageType::deltaIndexTermInsert) {
+        //BwDeltaIndexTermInsertNode * index_insert_node =
+        //                        static_cast<BwDeltaIndexTermInsertNode*>(curr_node);
+        //index_insert_node
+      }
+  }
+  return curr_pid;
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
