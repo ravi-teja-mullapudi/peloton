@@ -28,7 +28,9 @@ class BWTree {
   // TODO: pass a settings structure as we go along instead of
   // passing in individual parameter values
   BWTree(const KeyComparator& _key_comp)
-      : current_mapping_table_size(0), m_key_less(_key_comp) {
+      : current_mapping_table_size(0),
+        next_pid(0),
+        m_key_less(_key_comp) {
     // Initialize an empty tree
     m_root = this->NONE_PID;
   }
@@ -281,12 +283,20 @@ class BWTree {
 
   void mergeLeafNode(void);
 
+  void assignPageId(BwNode *new_node_p);
+
   // TODO: Add a global garbage vector per epoch using a lock
 
   // Note that this cannot be resized nor moved. So it is effectively
   // like declaring a static array
   // TODO: Maybe replace with a static array
+  // NOTE: This is not updated, since atomicity could not be guaranteed
   size_t current_mapping_table_size;
+
+  // Next available PID to allocate for any node
+  // This variable is made atomic to facilitate our atomic mapping table
+  // implementation
+  std::atomic<PID> next_pid;
   std::vector<std::atomic<BwNode*>> mapping_table{max_table_size};
 
   PID m_root;
@@ -319,6 +329,10 @@ bool BWTree<KeyType, ValueType, KeyComparator>::isLeaf(BwNode* n) {
     default:
       assert(false);
   }
+
+    // To make compiler happy.... Otherwise report error here
+    assert(false);
+    return false;
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
@@ -695,6 +709,29 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(PID id) {
     // Succeeded, request garbage collection of processed nodes
   }
   return true;
+}
+
+// This function will assign a page ID for a given page, and put that page into the
+// mapping table
+//
+// NOTE: This implementation referred to the Bw-Tree implementation on github:
+// >> https://github.com/flode/BwTree/blob/master/bwtree.hpp
+template <typename KeyType, typename ValueType, class KeyComparator>
+void BWTree<KeyType, ValueType, KeyComparator>::assignPageId(BwNode *new_node_p) {
+    // Let's assume first this will not happen; If it happens
+    // then we change this to a DEBUG output
+    // Need to use a variable length data structure
+    assert(next_pid < max_table_size);
+
+    // Though it is operating on std::atomic<PID>, the ++ operation
+    // will be reflected to the underlying storage
+    // Also threads will be serialized here to get their own PID
+    // Once a PID is assigned, different pages on different slots will
+    // interfere with each other
+    PID assigned_pid = next_pid++;
+    mapping_table[assigned_pid] = new_node_p;
+
+    return assigned_pid;
 }
 
 }  // End index namespace
