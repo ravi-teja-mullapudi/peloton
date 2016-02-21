@@ -756,7 +756,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::assignPageId(BwNode *new_node_p)
     PID assigned_pid = next_pid++;
     mapping_table[assigned_pid] = new_node_p;
 
-    return assigned_pid;
+    return;
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
@@ -776,6 +776,9 @@ void BWTree<KeyType, ValueType, KeyComparator>::installDeltaInsert(
     // Construct a new key-value pair and construct a new insert delta node
     auto ins_record = std::pair<KeyType, ValueType>(key, value);
     BwNode *new_leaf_p = (BwNode *)new BwDeltaInsertNode(old_leaf_p, ins_record);
+
+    // Hook it into the mapping table
+    assignPageId(new_leaf_p);
 
     // If this fails we must keep trying
     while(!mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p,
@@ -800,6 +803,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::installDeltaModify(
 
     auto modify_record = std::pair<KeyType, ValueType>(key, value);
     BwNode *new_leaf_p = (BwNode *)new BwDeltaModifyNode(old_leaf_p, modify_record);
+    assignPageId(new_leaf_p);
 
     while(!mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p,
                                                            new_leaf_p)) {
@@ -820,6 +824,8 @@ void BWTree<KeyType, ValueType, KeyComparator>::installDeltaDelete(
 
     auto delete_record = std::pair<KeyType, ValueType>(key, value);
     BwNode *new_leaf_p = (BwNode *)new BwDeltaDeleteNode(old_leaf_p, delete_record);
+    assignPageId(new_leaf_p);
+
     while(!mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p,
                                                            new_leaf_p)) {
         old_leaf_p = mapping_table[leaf_pid].load();
