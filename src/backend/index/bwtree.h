@@ -789,7 +789,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::installDeltaInsert(
     BwNode *new_leaf_p = (BwNode *)new BwDeltaInsertNode(old_leaf_p, ins_record);
 
     // Hook it into the mapping table
-    assignPageId(new_leaf_p);
+    //assignPageId(new_leaf_p);
 
     // If this fails we must keep trying
     while(!mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p,
@@ -814,7 +814,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::installDeltaModify(
 
     auto modify_record = std::pair<KeyType, ValueType>(key, value);
     BwNode *new_leaf_p = (BwNode *)new BwDeltaModifyNode(old_leaf_p, modify_record);
-    assignPageId(new_leaf_p);
+    //assignPageId(new_leaf_p);
 
     while(!mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p,
                                                            new_leaf_p)) {
@@ -835,7 +835,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::installDeltaDelete(
 
     auto delete_record = std::pair<KeyType, ValueType>(key, value);
     BwNode *new_leaf_p = (BwNode *)new BwDeltaDeleteNode(old_leaf_p, delete_record);
-    assignPageId(new_leaf_p);
+    //assignPageId(new_leaf_p);
 
     while(!mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p,
                                                            new_leaf_p)) {
