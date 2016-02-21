@@ -61,6 +61,16 @@ class BWTree {
 
   constexpr static PID NONE_PID = std::numeric_limits<PID>::max();
   constexpr static unsigned int max_table_size = 1 << 24;
+  // Threshold of delta chain length on an inner node to trigger a consolidate
+  constexpr static unsigned int delta_chain_inner_thesh = 8;
+  // Threshold of delta chain length on a leaf node to trigger a consolidate
+  constexpr static unsigned int delta_chain_leaf_thesh = 8;
+  // Node sizes for triggering splits and merges on inner nodes
+  constexpr static unsigned int inner_node_size_min = 8;
+  constexpr static unsigned int inner_node_size_max = 16;
+  // Node sizes for triggering splits and merges on leaf nodes
+  constexpr static unsigned int leaf_node_size_min = 8;
+  constexpr static unsigned int leaf_node_size_max = 16;
 
   // Enumeration of the types of nodes required in updating both the values
   // and the index in the Bw Tree. Currently only adding node types for
@@ -335,7 +345,6 @@ namespace index {
  */
 template <typename KeyType, typename ValueType, class KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::isLeaf(BwNode* n) {
-
   bool is_leaf = false;
   switch (n->type) {
     case deltaDelete:
@@ -355,6 +364,9 @@ bool BWTree<KeyType, ValueType, KeyComparator>::isLeaf(BwNode* n) {
   return is_leaf;
 }
 
+// Returns the first page where the key can reside
+// For insert and delete this means the page on which delta record can be added
+// For search means the first page the cursor needs to be constructed on
 template <typename KeyType, typename ValueType, class KeyComparator>
 typename BWTree<KeyType, ValueType, KeyComparator>::PID
 BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
@@ -362,6 +374,7 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
   assert(m_root != this->NONE_PID);
   PID curr_pid = m_root;
   BwNode* curr_node = mapping_table[curr_pid].load();
+  // First travese down to a leaf
   while (1) {
     assert(curr_node != nullptr);
     if (isLeaf(curr_node)) {
@@ -417,6 +430,44 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
       assert(false);
     }
   }
+
+  // Traverse to the right from the leaf till the appropriate page is found
+  // This means either the key is smaller than the largest key in the page
+  // or there are no siblings to check
+  curr_node = mapping_table[curr_pid].load();
+  while (1) {
+    assert(isLeaf(curr_node));
+    if (curr_node->type == PageType::deltaInsert) {
+      BwDeltaInsertNode* insert_node =
+          static_cast<BwDeltaInsertNode*>(curr_node);
+      if (key_lessequal(key, insert_node->ins_record.first)) {
+        break;
+      } else {
+        curr_node = insert_node->child_node;
+        assert(curr_node != nullptr);
+      }
+    } else if (curr_node->type == PageType::deltaDelete) {
+      BwDeltaDeleteNode* delete_node =
+          static_cast<BwDeltaDeleteNode*>(curr_node);
+      if (key_lessequal(key, delete_node->del_record.first)) {
+        break;
+      } else {
+        curr_node = delete_node->child_node;
+        assert(curr_node != nullptr);
+      }
+    } else if (curr_node->type == PageType::leaf) {
+      BwLeafNode* leaf_node = static_cast<BwLeafNode*>(curr_node);
+      if (key_lessequal(key, leaf_node->data.back().first) ||
+          leaf_node->next == this->NONE_PID) {
+        break;
+      } else {
+        curr_pid = leaf_node->next;
+        curr_node = mapping_table[curr_pid].load();
+      }
+    } else {
+      assert(false);
+    }
+  }
   return curr_pid;
 }
 
@@ -435,8 +486,8 @@ std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
   PID leaf_page = findLeafPage(key);
   assert(leaf_page != this->NONE_PID);
 
-  // Check if the node is a leaf node
   BwNode* curr_node = mapping_table[leaf_page].load();
+  // the node should be a leaf node
   assert(isLeaf(curr_node));
 
   // Check if the node is marked for consolidation, splitting or merging
@@ -743,8 +794,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(PID id) {
 // >> https://github.com/flode/BwTree/blob/master/bwtree.hpp
 template <typename KeyType, typename ValueType, class KeyComparator>
 typename BWTree<KeyType, ValueType, KeyComparator>::PID
-BWTree<KeyType, ValueType, KeyComparator>::installPage(
-    BwNode* new_node_p) {
+BWTree<KeyType, ValueType, KeyComparator>::installPage(BwNode* new_node_p) {
   // Let's assume first this will not happen; If it happens
   // then we change this to a DEBUG output
   // Need to use a variable length data structure
