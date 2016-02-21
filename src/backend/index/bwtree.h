@@ -75,6 +75,8 @@ class BWTree {
     deltaSplit,
     deltaIndexTermInsert,
     deltaIndexTermDelete,
+    deltaRemove,
+    deltaMerge,
   };
 
   class BwNode {
@@ -155,6 +157,23 @@ class BWTree {
     KeyType remove_node_high_key;
   };
 
+  class BwDeltaRemoveNode : public BwDeltaNode {
+   public:
+    BwDeltaRemoveNode(BwNode* _child_node)
+        : BwDeltaNode(PageType::deltaRemove, _child_node) {}
+  };
+
+  class BwDeltaMergeNode : public BwDeltaNode {
+   public:
+    BwDeltaMergeNode(BwNode* _child_node, KeyType separator_key,
+                     BwNode* merge_node)
+        : BwDeltaNode(PageType::deltaMerge, _child_node),
+          separator_key(separator_key),
+          merge_node(merge_node) {}
+    KeyType separator_key;
+    BwNode* merge_node;
+  };
+
   //===--------------------------------------------------------------------===//
   // Inner & leaf nodes
   //===--------------------------------------------------------------------===//
@@ -224,7 +243,17 @@ class BWTree {
   }
 
   // Internal functions to be implemented
+  void traverseAndConsolidateLeaf(
+      BwNode* node, std::vector<BwNode*>& garbage_nodes,
+      std::vector<std::pair<KeyType, ValueType>>& data, PID& sibling,
+      bool& has_merge, BwNode*& merge_node);
+
   bool consolidateLeafNode(PID id);
+
+  void traverseAndConsolidateInner(
+      BwNode* node, std::vector<BwNode*>& garbage_nodes,
+      std::vector<std::pair<KeyType, PID>>& separators, PID& sibling,
+      bool& has_merge, BwNode*& merge_node);
 
   bool consolidateInnerNode(PID id);
 
@@ -317,7 +346,10 @@ std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
-bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
+void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
+    BwNode* original_node, std::vector<BwNode*>& garbage_nodes,
+    std::vector<std::pair<KeyType, ValueType>>& data, PID& sibling,
+    bool& has_merge, BwNode*& merge_node) {
   std::unordered_set<std::pair<KeyType, ValueType>> insert_records;
   std::unordered_set<std::pair<KeyType, ValueType>> delete_records;
 
@@ -325,9 +357,11 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
   KeyType split_separator_key;
   PID new_sibling;
 
+  has_merge = false;
+  KeyType merge_separator_key;
+  merge_node = nullptr;
+
   // Keep track of nodes so we can garbage collect later
-  std::vector<BwNode*> garbage_nodes;
-  BwNode* original_node = mapping_table[id].load();
   BwNode* node = original_node;
   while (node->type != leaf) {
     switch (node->type) {
@@ -359,65 +393,83 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
         new_sibling = split_node->split_sibling;
         break;
       }
+      case deltaMerge: {
+        // Same as split, invariant is that merge nodes always force a
+        // consolidate, so should be at the top
+        assert(node == original_node);
+        BwDeltaMergeNode* merge_delta = static_cast<BwDeltaMergeNode*>(node);
+        has_merge = true;
+        merge_separator_key = merge_delta->separator_key;
+        merge_node = merge_delta->merge_node;
+        break;
+      }
       default:
         assert(false);
     }
 
     garbage_nodes.push_back(node);
     node = static_cast<BwDeltaNode*>(node)->child_node;
-    if (node == nullptr) break;
+    assert(node != nullptr);
   }
 
-  BwLeafNode* consolidated_node;
-  if (node == nullptr) {
-    // no leaf node
-    assert(!has_split);
-    consolidated_node = new BwLeafNode(NONE_PID);
-    std::vector<std::pair<KeyType, ValueType>>& data = consolidated_node->data;
+  // node is a leaf node
+  BwLeafNode* leaf_node = static_cast<BwLeafNode*>(node);
 
-    // Delete records should be empty because there is nothing else to delete
-    // at this point
-    assert(delete_records.empty());
-    data.insert(data.begin(), insert_records.begin(), insert_records.end());
-    std::sort(data.begin(), data.end());
+  if (has_split) {
+    // Change sibling pointer if we did a split
+    sibling = new_sibling;
   } else {
-    // node is a leaf node
-    BwLeafNode* leaf_node = static_cast<BwLeafNode*>(node);
+    sibling = leaf_node->next;
+  }
 
-    if (has_split) {
-      // Change sibling pointer if we did a split
-      consolidated_node = new BwLeafNode(new_sibling);
+  for (std::pair<KeyType, ValueType>& tuple : leaf_node->data) {
+    auto it = delete_records.find(tuple);
+    if (it != delete_records.end()) {
+      // Deleting to ensure correctness but not necessary
+      delete_records.erase(it);
     } else {
-      consolidated_node = new BwLeafNode(leaf_node->next);
-    }
-    std::vector<std::pair<KeyType, ValueType>>& data = consolidated_node->data;
-
-    for (std::pair<KeyType, ValueType>& tuple : leaf_node->data) {
-      auto it = delete_records.find(tuple);
-      if (it != delete_records.end()) {
-        // Deleting to ensure correctness but not necessary
-        delete_records.erase(it);
-      } else {
-        // Either not split or is split and tuple is less than separator
-        if (!has_split || key_less(std::get<0>(tuple), split_separator_key)) {
-          data.push_back(tuple);
-        }
-      }
-    }
-    // Should have deleted all the records
-    // Even with split, this should be fine because all the tuples will still
-    // be in the original base page
-    assert(delete_records.empty());
-
-    // Insert only new records before the split
-    for (std::pair<KeyType, ValueType>& tuple : insert_records) {
+      // Either not split or is split and tuple is less than separator
       if (!has_split || key_less(std::get<0>(tuple), split_separator_key)) {
         data.push_back(tuple);
       }
     }
-    // This is not very efficient, but ok for now
-    std::sort(data.begin(), data.end(), BwLeafNode::comp_data);
   }
+  // Should have deleted all the records
+  // Even with split, this should be fine because all the tuples will still
+  // be in the original base page
+  assert(delete_records.empty());
+
+  // Insert only new records before the split
+  for (std::pair<KeyType, ValueType>& tuple : insert_records) {
+    if (!has_split || key_less(std::get<0>(tuple), split_separator_key)) {
+      data.push_back(tuple);
+    }
+  }
+  // This is not very efficient, but ok for now
+  std::sort(data.begin(), data.end(), BwLeafNode::comp_data);
+}
+
+template <typename KeyType, typename ValueType, class KeyComparator>
+bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
+  // Keep track of nodes so we can garbage collect later
+  BwNode* original_node = mapping_table[id].load();
+
+  std::vector<BwNode*> garbage_nodes;
+  std::vector<std::pair<KeyType, ValueType>> data;
+  PID sibling;
+  bool has_merge = false;
+  BwNode* merge_node = nullptr;
+  traverseAndConsolidateLeaf(original_node, garbage_nodes, data, sibling,
+                             has_merge, merge_node);
+  if (has_merge) {
+    BwNode* dummy_node;
+    traverseAndConsolidateLeaf(merge_node, garbage_nodes, data, sibling,
+                               has_merge, dummy_node);
+    assert(!has_merge);
+  }
+
+  BwLeafNode* consolidated_node = new BwLeafNode(sibling);
+  consolidated_node->data.swap(data);
 
   bool result = mapping_table[id].compare_exchange_strong(original_node,
                                                           consolidated_node);
@@ -431,7 +483,10 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
-bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(PID id) {
+void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
+    BwNode* original_node, std::vector<BwNode*>& garbage_nodes,
+    std::vector<std::pair<KeyType, PID>>& separators, PID& sibling,
+    bool& has_merge, BwNode*& merge_node) {
   std::vector<std::pair<KeyType, PID>> insert_separators;
   std::vector<std::pair<KeyType, PID>> delete_separators;
 
@@ -439,23 +494,16 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(PID id) {
   KeyType split_separator_key;
   PID new_sibling;
 
+  has_merge = false;
+  KeyType merge_separator_key;
+  merge_node = nullptr;
+
   // Keep track of nodes so we can garbage collect later
-  std::vector<BwNode*> garbage_nodes;
-  BwNode* original_node = mapping_table[id].load();
+  // NOTE(apoms): This logic is almost identical to the leaf node traversal
+  // but its more efficient because it was my second time writing it
   BwNode* node = original_node;
   while (node->type != inner) {
     switch (node->type) {
-      case deltaSplit: {
-        // Our invariant is that split nodes always force a consolidate, so
-        // should be at the top
-        assert(node == original_node);  // Ensure the split is at the top
-        assert(!has_split);             // Ensure this is the only split
-        BwDeltaSplitNode* split_node = static_cast<BwDeltaSplitNode*>(node);
-        has_split = true;
-        split_separator_key = split_node->separator_key;
-        new_sibling = split_node->split_sibling;
-        break;
-      }
       case deltaIndexTermInsert: {
         BwDeltaIndexTermInsertNode* insert_node =
             static_cast<BwDeltaIndexTermInsertNode*>(node);
@@ -476,6 +524,27 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(PID id) {
         }
         break;
       }
+      case deltaSplit: {
+        // Our invariant is that split nodes always force a consolidate, so
+        // should be at the top
+        assert(node == original_node);  // Ensure the split is at the top
+        assert(!has_split);             // Ensure this is the only split
+        BwDeltaSplitNode* split_node = static_cast<BwDeltaSplitNode*>(node);
+        has_split = true;
+        split_separator_key = split_node->separator_key;
+        new_sibling = split_node->split_sibling;
+        break;
+      }
+      case deltaMerge: {
+        // Same as split, invariant is that merge nodes always force a
+        // consolidate, so should be at the top
+        assert(node == original_node);
+        BwDeltaMergeNode* merge_delta = static_cast<BwDeltaMergeNode*>(node);
+        has_merge = true;
+        merge_separator_key = merge_delta->separator_key;
+        merge_node = merge_delta->merge_node;
+        break;
+      }
       default:
         assert(false);
     }
@@ -486,7 +555,6 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(PID id) {
 
   BwInnerNode* inner_node = static_cast<BwInnerNode*>(node);
 
-  BwInnerNode* consolidated_node;
   typename std::vector<std::pair<KeyType, PID>>::iterator base_end;
   if (has_split) {
     // Find end of separators if split
@@ -495,27 +563,49 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(PID id) {
                          inner_node->separators.end(), split_separator_key,
                          [=](const std::pair<KeyType, PID>& l, const KeyType& r)
                              -> bool { return m_key_less(std::get<0>(l), r); });
-    consolidated_node = new BwInnerNode(new_sibling);
+    sibling = new_sibling;
   } else {
     base_end = inner_node->separators.end();
-    consolidated_node = new BwInnerNode(inner_node->next);
+    sibling = inner_node->next;
   }
 
-  std::vector<std::pair<KeyType, PID>>& separators =
-      consolidated_node->separators;
   // Merge with difference
   auto less_fn =
       [=](const std::pair<KeyType, PID>& l, const std::pair<KeyType, PID>& r)
           -> bool { return m_key_less(std::get<0>(l), std::get<0>(r)); };
   // Not very efficient (difference and merge could be combined)
+  auto separators_start = separators.end();  // Might have sorted data in it
   std::set_difference(inner_node->separators.begin(), base_end,
                       delete_separators.begin(), delete_separators.end(),
-                      std::inserter(separators, separators.begin()), less_fn);
+                      std::inserter(separators, separators.end()), less_fn);
   // Append sorted inserts to end
   auto middle_it = separators.insert(
       separators.end(), insert_separators.begin(), insert_separators.end());
   // Merge the results together
-  std::inplace_merge(separators.begin(), middle_it, separators.end());
+  std::inplace_merge(separators_start, middle_it, separators.end());
+}
+
+template <typename KeyType, typename ValueType, class KeyComparator>
+bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(PID id) {
+  BwNode* original_node = mapping_table[id].load();
+
+  // Keep track of nodes so we can garbage collect later
+  std::vector<BwNode*> garbage_nodes;
+  std::vector<std::pair<KeyType, PID>> separators;
+  PID sibling;
+  bool has_merge = false;
+  BwNode* merge_node = nullptr;
+  traverseAndConsolidateInner(original_node, garbage_nodes, separators, sibling,
+                              has_merge, merge_node);
+  if (has_merge) {
+    BwNode* dummy_node;
+    traverseAndConsolidateInner(merge_node, garbage_nodes, separators, sibling,
+                                has_merge, dummy_node);
+    assert(!has_merge);
+  }
+
+  BwInnerNode* consolidated_node = new BwInnerNode(sibling);
+  consolidated_node->separators.swap(separators);
 
   bool result = mapping_table[id].compare_exchange_strong(original_node,
                                                           consolidated_node);
