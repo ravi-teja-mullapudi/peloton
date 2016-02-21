@@ -217,7 +217,7 @@ class BWTree {
   };
 
   /// True if a < b ? "constructed" from m_key_less()
-  inline bool key_less(const KeyType& a, const KeyType b) const {
+  inline bool key_less(const KeyType& a, const KeyType &b) const {
     return m_key_less(a, b);
   }
 
@@ -323,17 +323,32 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
       }
       else if(curr_node->type == PageType::inner) {
         BwInnerNode* inner_node = static_cast<BwInnerNode*>(curr_node);
-        auto sep_iter =
-        std::lower_bound(inner_node->separators.begin(),
-                         inner_node->separators.end(), key,
-                         [=](const std::pair<KeyType, PID>& l, const KeyType& r)
-                             -> bool { return m_key_less(std::get<0>(l), r); });
-        curr_pid = sep_iter->second;
+        assert(inner_node->separators.size() > 0);
+        for (int i = 1; i < inner_node->separators.size(); i++) {
+            if (key_less(inner_node->separators[i-1].first, key) &&
+                key_less(inner_node->separators[i].first, key)) {
+                continue;
+            } else {
+                curr_pid = inner_node->separators[i-1].second;
+                break;
+            }
+        }
+        // Reach here if there is only one or the search reaches the node
+        curr_pid = inner_node->separators.back().second;
         continue;
       } else if(curr_node->type == PageType::deltaIndexTermInsert) {
-        //BwDeltaIndexTermInsertNode * index_insert_node =
-        //                        static_cast<BwDeltaIndexTermInsertNode*>(curr_node);
-        //index_insert_node
+        /*
+        BwDeltaIndexTermInsertNode * index_insert_node =
+                                static_cast<BwDeltaIndexTermInsertNode*>(curr_node);
+        if (key_less(index_insert_node->new_split_separator_key, key))
+
+        index_insert_node->next_separator_key
+        */
+      } else if(curr_node->type == PageType::deltaIndexTermDelete) {
+        /*
+        BwDeltaIndexTermDeleteNode * index_delete_node =
+                                static_cast<BwDeltaIndexTermInsertNode*>(curr_node);
+        */
       }
   }
   return curr_pid;
