@@ -285,6 +285,13 @@ class BWTree {
 
   void assignPageId(BwNode *new_node_p);
 
+  // This only applies to lead node - For intermediate nodes
+  // the insertion of sep/child pair must be done using different
+  // insertion method
+  void installDeltaInsert(PID leaf_pid,
+                          const KeyType& key,
+                          const ValueType& value);
+
   // TODO: Add a global garbage vector per epoch using a lock
 
   // Note that this cannot be resized nor moved. So it is effectively
@@ -314,10 +321,16 @@ namespace peloton {
 namespace index {
 
 // Add your function definitions here
+
+/*
+ * isLeaf() - Returns true if the BwNode * refers to a leaf page
+ * or its delta page
+ */
 template <typename KeyType, typename ValueType, class KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::isLeaf(BwNode* n) {
   switch (n->type) {
     case deltaDelete:
+    case deltaModify:
     case deltaInsert:
     case leaf:
       return true;
@@ -732,6 +745,36 @@ void BWTree<KeyType, ValueType, KeyComparator>::assignPageId(BwNode *new_node_p)
     mapping_table[assigned_pid] = new_node_p;
 
     return assigned_pid;
+}
+
+template <typename KeyType, typename ValueType, class KeyComparator>
+void BWTree<KeyType, ValueType, KeyComparator>::installDeltaInsert(
+    PID leaf_pid,
+    const KeyType& key,
+    const ValueType& value)
+{
+    // We could only use BwNode * since it is the
+    // type of mapping table
+    BwNode* old_leaf_p = mapping_table[leaf_pid].load();
+
+    // We must be working on a leaf page
+    // This includes base page, delete page, insert page and modify page
+    assert(isLeaf(old_leaf_p));
+
+    // Construct a new key-value pair and construct a new insert delta node
+    auto ins_record = std::pair<KeyType, ValueType>(key, value);
+    BwNode *new_leaf_p = (BwNode *)new BwDeltaInsertNode(old_leaf_p, ins_record);
+
+    // If this fails we must keep trying
+    while(!mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p,
+                                                           new_leaf_p)) {
+        // In most cases it should not reach here. If it does
+        // then the leaf page has been changed, and in that case
+        // we just re-read the page and try again
+        old_leaf_p = mapping_table[leaf_pid].load();
+    }
+
+    return;
 }
 
 }  // End index namespace
