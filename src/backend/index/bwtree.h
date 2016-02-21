@@ -561,7 +561,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
   if (has_split) {
     // Find end of separators if split
     base_end =
-        std::lower_bound(inner_node->separators.begin(),
+        std::upper_bound(inner_node->separators.begin(),
                          inner_node->separators.end(), split_separator_key,
                          [=](const std::pair<KeyType, PID>& l, const KeyType& r)
                              -> bool { return m_key_less(std::get<0>(l), r); });
