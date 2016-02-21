@@ -154,6 +154,7 @@ class BWTree {
     PID node_to_merge_into;
     PID node_to_remove;
     KeyType merge_node_low_key;
+    KeyType remove_node_low_key;
     KeyType remove_node_high_key;
   };
 
@@ -399,7 +400,6 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
   KeyType merge_separator_key;
   merge_node = nullptr;
 
-  // Keep track of nodes so we can garbage collect later
   BwNode* node = original_node;
   while (node->type != leaf) {
     switch (node->type) {
@@ -528,10 +528,12 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
   std::vector<std::pair<KeyType, PID>> insert_separators;
   std::vector<std::pair<KeyType, PID>> delete_separators;
 
+  // Split variables
   bool has_split = false;
   KeyType split_separator_key;
   PID new_sibling;
 
+  // Merge variables
   has_merge = false;
   KeyType merge_separator_key;
   merge_node = nullptr;
@@ -555,10 +557,10 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
       case deltaIndexTermDelete: {
         BwDeltaIndexTermDeleteNode* delete_node =
             static_cast<BwDeltaIndexTermDeleteNode*>(node);
-        if (!has_split || key_less(delete_node->new_split_separator_key,
+        if (!has_split || key_less(delete_node->remove_node_low_key,
                                    split_separator_key)) {
-          delete_separators.push_back({delete_node->new_split_separator_key,
-                                       delete_node->new_split_sibling});
+          delete_separators.push_back({delete_node->remove_node_low_key,
+                                       delete_node->node_to_remove});
         }
         break;
       }
@@ -611,8 +613,14 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
   auto less_fn =
       [=](const std::pair<KeyType, PID>& l, const std::pair<KeyType, PID>& r)
           -> bool { return m_key_less(std::get<0>(l), std::get<0>(r)); };
+
+  // Separators might have sorted data in it already (e.g. if there was a merge
+  // node and so the left half has already been consolidated into separators).
+  // Thus we keep track of the end so we know which part we need to make sure is
+  // sorted (all the data in separators should be less than any data in here
+  // because it was from a left sibling node).
+  auto separators_start = separators.end();
   // Not very efficient (difference and merge could be combined)
-  auto separators_start = separators.end();  // Might have sorted data in it
   std::set_difference(inner_node->separators.begin(), base_end,
                       delete_separators.begin(), delete_separators.end(),
                       std::inserter(separators, separators.end()), less_fn);
