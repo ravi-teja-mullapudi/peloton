@@ -316,8 +316,8 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
   // Root should always have a valid pid
   assert(m_root != this->NONE_PID);
   PID curr_pid = m_root;
+  BwNode* curr_node = mapping_table[curr_pid].load();
   while (1) {
-      BwNode* curr_node = mapping_table[curr_pid].load();
       assert(curr_node != nullptr);
       if (isLeaf(curr_node)) {
           break;
@@ -336,20 +336,30 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
         }
         // Reach here if there is only one or the search reaches the node
         curr_pid = inner_node->separators.back().second;
+        curr_node = mapping_table[curr_pid].load();
         continue;
+
       } else if(curr_node->type == PageType::deltaIndexTermInsert) {
-        /*
         BwDeltaIndexTermInsertNode * index_insert_node =
                                 static_cast<BwDeltaIndexTermInsertNode*>(curr_node);
-        if (key_less(index_insert_node->new_split_separator_key, key))
+        if (key_greater(key, index_insert_node->new_split_separator_key) &&
+                key_lessequal(key, index_insert_node->next_separator_key)) {
+            curr_pid = index_insert_node->new_split_sibling;
+            curr_node = mapping_table[curr_pid].load();
+            continue;
+        }
+        curr_node = index_insert_node->child_node;
 
-        index_insert_node->next_separator_key
-        */
       } else if(curr_node->type == PageType::deltaIndexTermDelete) {
-        /*
         BwDeltaIndexTermDeleteNode * index_delete_node =
-                                static_cast<BwDeltaIndexTermInsertNode*>(curr_node);
-        */
+                                static_cast<BwDeltaIndexTermDeleteNode*>(curr_node);
+        if (key_greater(key, index_delete_node->merge_node_low_key) &&
+                key_lessequal(key, index_delete_node->remove_node_high_key)) {
+            curr_pid = index_delete_node->node_to_merge_into;
+            curr_node = mapping_table[curr_pid].load();
+            continue;
+        }
+        curr_node = index_delete_node->child_node;
       }
   }
   return curr_pid;
