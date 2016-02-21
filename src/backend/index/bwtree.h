@@ -360,6 +360,18 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
             continue;
         }
         curr_node = index_delete_node->child_node;
+
+      } else if(curr_node->type == PageType::deltaSplit) {
+        BwDeltaSplitNode* split_node =
+                                static_cast<BwDeltaSplitNode*>(curr_node);
+          if (key_greater(key, split_node->separator_key)) {
+              curr_pid = split_node->split_sibling;
+              curr_node = mapping_table[curr_pid].load();
+              continue;
+          }
+          curr_node = split_node->child_node;
+      } else {
+          assert(false);
       }
   }
   return curr_pid;
