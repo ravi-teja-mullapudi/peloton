@@ -332,7 +332,6 @@ bool BWTree<KeyType, ValueType, KeyComparator>::isLeaf(BwNode* n) {
   bool is_leaf = false;
   switch (n->type) {
     case deltaDelete:
-    case deltaModify:
     case deltaInsert:
     case leaf:
       is_leaf = true;
