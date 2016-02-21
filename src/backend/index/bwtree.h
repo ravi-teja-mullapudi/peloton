@@ -82,7 +82,6 @@ class BWTree {
     inner,
     // Page type
     deltaInsert,
-    deltaModify,
     deltaDelete,
     // Inner type
     deltaSplit,
@@ -127,16 +126,6 @@ class BWTree {
       del_record = _del_record;
     }
     std::pair<KeyType, ValueType> del_record;
-  };
-
-  class BwDeltaModifyNode : public BwDeltaNode {
-   public:
-    BwDeltaModifyNode(BwNode* _child_node,
-                      std::pair<KeyType, ValueType> _modify_record)
-        : BwDeltaNode(PageType::deltaModify, _child_node) {
-      modify_record = _modify_record;
-    }
-    std::pair<KeyType, ValueType> modify_record;
   };
 
   class BwDeltaSplitNode : public BwDeltaNode {
@@ -299,11 +288,6 @@ class BWTree {
   // the insertion of sep/child pair must be done using different
   // insertion method
   void installDeltaInsert(PID leaf_pid, const KeyType& key,
-                          const ValueType& value);
-
-  // TODO: Consider re-implement this using function
-  // template (sacrifice readability)
-  void installDeltaModify(PID leaf_pid, const KeyType& key,
                           const ValueType& value);
 
   void installDeltaDelete(PID leaf_pid, const KeyType& key,
@@ -840,23 +824,6 @@ void BWTree<KeyType, ValueType, KeyComparator>::installDeltaInsert(
   return;
 }
 
-template <typename KeyType, typename ValueType, class KeyComparator>
-void BWTree<KeyType, ValueType, KeyComparator>::installDeltaModify(
-    PID leaf_pid, const KeyType& key, const ValueType& value) {
-  BwNode* old_leaf_p = mapping_table[leaf_pid].load();
-  assert(isLeaf(old_leaf_p));
-
-  auto modify_record = std::pair<KeyType, ValueType>(key, value);
-  BwNode* new_leaf_p =
-      (BwNode*)new BwDeltaModifyNode(old_leaf_p, modify_record);
-
-  while (!mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p,
-                                                          new_leaf_p)) {
-    old_leaf_p = mapping_table[leaf_pid].load();
-  }
-
-  return;
-}
 
 template <typename KeyType, typename ValueType, class KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::installDeltaDelete(
