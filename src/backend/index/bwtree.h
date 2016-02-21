@@ -287,7 +287,7 @@ class BWTree {
 
   void assignPageId(BwNode *new_node_p);
 
-  // This only applies to lead node - For intermediate nodes
+  // This only applies to leaf node - For intermediate nodes
   // the insertion of sep/child pair must be done using different
   // insertion method
   void installDeltaInsert(PID leaf_pid,
@@ -309,8 +309,8 @@ class BWTree {
   // Note that this cannot be resized nor moved. So it is effectively
   // like declaring a static array
   // TODO: Maybe replace with a static array
-  // NOTE: This is not updated, since atomicity could not be guaranteed
-  size_t current_mapping_table_size;
+  // NOTE: This is updated together with next_pid atomically
+  std::atomic<size_t> current_mapping_table_size;
 
   // Next available PID to allocate for any node
   // This variable is made atomic to facilitate our atomic mapping table
@@ -425,6 +425,15 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
       }
   }
   return curr_pid;
+}
+
+/*
+ * splitLeafNode() - Find a pivot and post delta record both on
+ * the leaf node, and on its parent node
+ */
+template <typename KeyType, typename ValueType, class KeyComparator>
+void BWTree<KeyType, ValueType, KeyComparator>::splitLeafNode(void) {
+
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
@@ -755,6 +764,8 @@ void BWTree<KeyType, ValueType, KeyComparator>::assignPageId(BwNode *new_node_p)
     // interfere with each other
     PID assigned_pid = next_pid++;
     mapping_table[assigned_pid] = new_node_p;
+
+    current_mapping_table_size++;
 
     return;
 }
