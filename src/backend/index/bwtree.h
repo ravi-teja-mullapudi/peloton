@@ -71,6 +71,7 @@ class BWTree {
     leaf,
     inner,
     deltaInsert,
+    deltaModify,
     deltaDelete,
     deltaSplit,
     deltaIndexTermInsert,
@@ -114,6 +115,16 @@ class BWTree {
       del_record = _del_record;
     }
     std::pair<KeyType, ValueType> del_record;
+  };
+
+  class BwDeltaModifyNode : public BwDeltaNode {
+   public:
+    BwDeltaModifyNode(BwNode* _child_node,
+                      std::pair<KeyType, ValueType> _modify_record)
+        : BwDeltaNode(PageType::deltaModify, _child_node) {
+      modify_record = _modify_record;
+    }
+    std::pair<KeyType, ValueType> modify_record;
   };
 
   class BwDeltaSplitNode : public BwDeltaNode {
