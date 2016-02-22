@@ -67,9 +67,10 @@ class BWTree {
     PID page_pid = findLeafPage(key);
     assert(isLeafPID(page_pid));
 
-    BwNode *leaf_node_p = mapping_table[page_pid].load();
+    BwNode* leaf_node_p = mapping_table[page_pid].load();
     assert(leaf_node_p != nullptr);
 
+<<<<<<< HEAD
     // They are used in different branches
     BwDeltaInsertNode *insert_page_p = nullptr;
     BwDeltaDeleteNode *delete_page_p = nullptr;
@@ -104,10 +105,42 @@ class BWTree {
             // TODO: Add support for duplicated key
             base_page_p = static_cast<BwLeafNode *>(leaf_node_p);
             return base_page_p->find(key);
+=======
+    BwDeltaInsertNode* insert_page_p = nullptr;
+    BwDeltaDeleteNode* delete_page_p = nullptr;
+    BwLeafNode* base_page_p = nullptr;
+    std::pair<KeyType, ValueType>* pair_p = nullptr;
+
+    while (1) {
+      if (isDeltaInsert(leaf_node_p)) {
+        insert_page_p = static_cast<BwDeltaInsertNode*>(leaf_node_p);
+
+        // If we see an insert node first, then this implies that the
+        // key does exist in the future comsolidated version of the page
+        if (key_equal(insert_page_p->ins_record.first, key) == true) {
+          return true;
+        } else {
+          leaf_node_p = (static_cast<BwDeltaNode*>(leaf_node_p))->child_node;
+>>>>>>> ebfdbe5a6fbbb1138044e1a1a616080f4e3facfd
         }
-        else {
-            assert(false);
+      } else if (isDeltaDelete(leaf_node_p)) {
+        delete_page_p = static_cast<BwDeltaDeleteNode*>(leaf_node_p);
+
+        // For delete record it implies the node has been removed
+        if (key_equal(delete_page_p->del_record.first, key) == true) {
+          return false;
+        } else {
+          leaf_node_p = (static_cast<BwDeltaNode*>(leaf_node_p))->child_node;
         }
+      } else if (isBasePage(leaf_node_p)) {
+        // The last step is to search the key in the leaf, and we search
+        // for the key in leaf page
+        // TODO: Add support for duplicated key
+        base_page_p = static_cast<BwLeafNode*>(leaf_node_p);
+        return base_page_p->find(key);
+      } else {
+        assert(false);
+      }
     }
 
     // Should not reach here
@@ -290,8 +323,6 @@ class BWTree {
     BwLeafNode(PID _next) : BwNode(PageType::leaf) { next = _next; }
     // TODO : maybe we need to implement both a left and right pointer for
     // now sticking with just next
-    // next can only be NONE_PID when the PageType is leaf or
-    // inner and not root
     bool comp_data(const std::pair<KeyType, ValueType>& d1,
                    const std::pair<KeyType, ValueType>& d2) {
       return m_key_less(d1.first, d2.first);
@@ -354,17 +385,11 @@ class BWTree {
 
   // Below three methods are inline helper functions
   // to help identification of different type of leaf nodes
-  bool isDeltaInsert(BwNode *node_p) {
-    return node_p->type == deltaInsert;
-  }
+  bool isDeltaInsert(BwNode* node_p) { return node_p->type == deltaInsert; }
 
-  bool isDeltaDelete(BwNode *node_p) {
-    return node_p->type == deltaDelete;
-  }
+  bool isDeltaDelete(BwNode* node_p) { return node_p->type == deltaDelete; }
 
-  bool isBasePage(BwNode *node_p) {
-    return node_p->type == leaf;
-  }
+  bool isBasePage(BwNode* node_p) { return node_p->type == leaf; }
 
   PID findLeafPage(const KeyType& key);
 
@@ -453,9 +478,8 @@ bool BWTree<KeyType, ValueType, KeyComparator>::isLeaf(BwNode* n) {
  * will not change
  */
 template <typename KeyType, typename ValueType, class KeyComparator>
-bool BWTree<KeyType, ValueType, KeyComparator>::isLeafPID(PID pid)
-{
-    return isLeaf(mapping_table[pid].load());
+bool BWTree<KeyType, ValueType, KeyComparator>::isLeafPID(PID pid) {
+  return isLeaf(mapping_table[pid].load());
 }
 
 // Returns the first page where the key can reside
@@ -468,70 +492,80 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
   assert(m_root != this->NONE_PID);
   PID curr_pid = m_root;
   BwNode* curr_node = mapping_table[curr_pid].load();
-  // First travese down to a leaf
+  // Zig-zag traversal
   while (1) {
     assert(curr_node != nullptr);
-    if (isLeaf(curr_node)) {
-      break;
-    } else if (curr_node->type == PageType::inner) {
+    if (curr_node->type == PageType::inner) {
       BwInnerNode* inner_node = static_cast<BwInnerNode*>(curr_node);
       assert(inner_node->separators.size() > 0);
+      // TODO Change this to binary search
+      bool found_sep = false;
       for (int i = 1; i < inner_node->separators.size(); i++) {
         if (key_less(inner_node->separators[i - 1].first, key) &&
             key_less(inner_node->separators[i].first, key)) {
           continue;
         } else {
+          found_sep = true;
           curr_pid = inner_node->separators[i - 1].second;
           break;
         }
       }
-      // Reach here if there is only one or the search reaches the node
-      curr_pid = inner_node->separators.back().second;
+
+      if (!found_sep) {
+        if (inner_node->next == this->NONE_PID)
+          curr_pid = inner_node->separators.back().second;
+        else {
+          // Jump to sibling need to post an index update
+          // There might need to consider duplicates separately
+          curr_pid = inner_node->next;
+        }
+      }
+
       curr_node = mapping_table[curr_pid].load();
       continue;
 
     } else if (curr_node->type == PageType::deltaIndexTermInsert) {
-      BwDeltaIndexTermInsertNode* index_insert_node =
+      BwDeltaIndexTermInsertNode* index_insert_delta =
           static_cast<BwDeltaIndexTermInsertNode*>(curr_node);
-      if (key_greater(key, index_insert_node->new_split_separator_key) &&
-          key_lessequal(key, index_insert_node->next_separator_key)) {
-        curr_pid = index_insert_node->new_split_sibling;
+      if (key_greater(key, index_insert_delta->new_split_separator_key) &&
+          key_lessequal(key, index_insert_delta->next_separator_key)) {
+        curr_pid = index_insert_delta->new_split_sibling;
         curr_node = mapping_table[curr_pid].load();
         continue;
       }
-      curr_node = index_insert_node->child_node;
+      curr_node = index_insert_delta->child_node;
 
     } else if (curr_node->type == PageType::deltaIndexTermDelete) {
-      BwDeltaIndexTermDeleteNode* index_delete_node =
+      BwDeltaIndexTermDeleteNode* index_delete_delta =
           static_cast<BwDeltaIndexTermDeleteNode*>(curr_node);
-      if (key_greater(key, index_delete_node->merge_node_low_key) &&
-          key_lessequal(key, index_delete_node->remove_node_high_key)) {
-        curr_pid = index_delete_node->node_to_merge_into;
+      if (key_greater(key, index_delete_delta->merge_node_low_key) &&
+          key_lessequal(key, index_delete_delta->remove_node_high_key)) {
+        curr_pid = index_delete_delta->node_to_merge_into;
         curr_node = mapping_table[curr_pid].load();
         continue;
       }
-      curr_node = index_delete_node->child_node;
+      curr_node = index_delete_delta->child_node;
 
     } else if (curr_node->type == PageType::deltaSplit) {
-      BwDeltaSplitNode* split_node = static_cast<BwDeltaSplitNode*>(curr_node);
-      if (key_greater(key, split_node->separator_key)) {
-        curr_pid = split_node->split_sibling;
+      BwDeltaSplitNode* split_delta = static_cast<BwDeltaSplitNode*>(curr_node);
+      if (key_greater(key, split_delta->separator_key)) {
+        curr_pid = split_delta->split_sibling;
         curr_node = mapping_table[curr_pid].load();
         continue;
       }
-      curr_node = split_node->child_node;
-    } else {
-      assert(false);
-    }
-  }
+      curr_node = split_delta->child_node;
 
-  // Traverse to the right from the leaf till the appropriate page is found
-  // This means either the key is smaller than the largest key in the page
-  // or there are no siblings to check
-  curr_node = mapping_table[curr_pid].load();
-  while (1) {
-    assert(isLeaf(curr_node));
-    if (curr_node->type == PageType::deltaInsert) {
+    } else if (curr_node->type == PageType::deltaRemove) {
+      // Have to find the left sibling
+      assert(false);
+    } else if (curr_node->type == PageType::deltaMerge) {
+      BwDeltaMergeNode* merge_delta = static_cast<BwDeltaMergeNode*>(curr_node);
+      if (key_greater(key, merge_delta->separator_key)) {
+        curr_node = merge_delta->merge_node;
+      } else {
+        curr_node = merge_delta->child_node;
+      }
+    } else if (curr_node->type == PageType::deltaInsert) {
       BwDeltaInsertNode* insert_node =
           static_cast<BwDeltaInsertNode*>(curr_node);
       if (key_lessequal(key, insert_node->ins_record.first)) {
@@ -555,6 +589,8 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
           leaf_node->next == this->NONE_PID) {
         break;
       } else {
+        // Jump to sibling need to post an index update
+        // There might need to consider duplicates separately
         curr_pid = leaf_node->next;
         curr_node = mapping_table[curr_pid].load();
       }
@@ -933,7 +969,6 @@ void BWTree<KeyType, ValueType, KeyComparator>::installDeltaInsert(
 
   return;
 }
-
 
 template <typename KeyType, typename ValueType, class KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::installDeltaDelete(
