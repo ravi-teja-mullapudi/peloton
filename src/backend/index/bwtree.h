@@ -37,9 +37,14 @@ class BWTree {
     // TODO cleanup
   }
 
-  bool insert(__attribute__((unused)) const KeyType& key,
-              __attribute__((unused)) const ValueType& value) {
-    /* TODO */
+  bool insert(const KeyType& key, const ValueType& value) {
+    // First reach the leaf page where the key should be inserted
+    PID page_pid = findLeafPage(key);
+    assert(isLeafPID(page_pid));
+
+    // Then install an insertion record
+    installDeltaInsert(page_pid, key, value);
+
     return true;
   }
 
@@ -48,9 +53,15 @@ class BWTree {
     return true;
   }
 
-  bool erase(__attribute__((unused)) const KeyType& key,
-             __attribute__((unused)) const ValueType& value) {
-    /* TODO */
+  bool erase(const KeyType& key, const ValueType& value) {
+    // First reach the leaf page where the key should be inserted
+    PID page_pid = findLeafPage(key);
+    assert(isLeafPID(page_pid));
+
+    // NOTE: Since there could be multiple keys with different value
+    // we need also to specify a value for deletion
+    installDeltaDelete(page_pid, key, value);
+
     return true;
   }
 
@@ -271,6 +282,7 @@ class BWTree {
   bool consolidateInnerNode(PID id);
 
   bool isLeaf(BwNode* n);
+  bool isLeafPID(PID pid);
 
   PID findLeafPage(const KeyType& key);
 
@@ -282,6 +294,10 @@ class BWTree {
 
   void mergeLeafNode(void);
 
+  // Atomically install a page into mapping table
+  // NOTE: There are times that new pages are not installed into
+  // mapping table but instead they directly replace other page
+  // with the same PID
   PID installPage(BwNode* new_node_p);
 
   // This only applies to leaf node - For intermediate nodes
@@ -345,6 +361,19 @@ bool BWTree<KeyType, ValueType, KeyComparator>::isLeaf(BwNode* n) {
   }
 
   return is_leaf;
+}
+
+/*
+ * isLeafPID() - Returns true if a PID refers to a leaf node
+ *
+ * It acts as a wrapper to isLeaf(). Please note that even
+ * if the PID-pointer relation has changed, identity of leaf
+ * will not change
+ */
+template <typename KeyType, typename ValueType, class KeyComparator>
+bool BWTree<KeyType, ValueType, KeyComparator>::isLeafPID(PID pid)
+{
+    return isLeaf(mapping_table[pid].load());
 }
 
 // Returns the first page where the key can reside
