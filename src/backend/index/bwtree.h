@@ -37,6 +37,11 @@ class BWTree {
     // TODO cleanup
   }
 
+  /*
+   * insert() - Insert a key-value pair into B-Tree
+   *
+   * NOTE: No duplicated key support
+   */
   bool insert(const KeyType& key, const ValueType& value) {
     // First reach the leaf page where the key should be inserted
     PID page_pid = findLeafPage(key);
@@ -48,11 +53,72 @@ class BWTree {
     return true;
   }
 
-  bool exists(__attribute__((unused)) const KeyType& key) {
-    /* TODO*/
-    return true;
+  /*
+   * exists() - Return true if a key exists in the tree
+   *
+   * Searches through the chain of delta pages, scanning for both
+   * delta record and the final leaf record
+   *
+   * NOTE: Currently this method does not support duplicated key
+   * test, since duplicated keys might span multiple pages
+   */
+  bool exists(const KeyType& key) {
+    PID page_pid = findLeafPage(key);
+    assert(isLeafPID(page_pid));
+
+    BwNode *leaf_node_p = mapping_table[page_pid].load();
+    assert(leaf_node_p != nullptr);
+
+    BwDeltaInsertNode *insert_page_p = nullptr;
+    BwDeltaDeleteNode *delete_page_p = nullptr;
+    BwLeafNode *base_page_p = nullptr;
+    std::pair<KeyType, ValueType> *pair_p = nullptr;
+
+    while(1) {
+        if(isDeltaInsert(leaf_node_p)) {
+            insert_page_p = static_cast<BwDeltaInsertNode *>(leaf_node_p);
+
+            // If we see an insert node first, then this implies that the
+            // key does exist in the future comsolidated version of the page
+            if(key_equal(insert_page_p->ins_record.first, key) == true) {
+                return true;
+            } else {
+                leaf_node_p = (static_cast<BwDeltaNode *>(leaf_node_p))->child_node;
+            }
+        }
+        else if(isDeltaDelete(leaf_node_p)) {
+            delete_page_p = static_cast<BwDeltaDeleteNode *>(leaf_node_p);
+
+            // For delete record it implies the node has been removed
+            if(key_equal(delete_page_p->del_record.first, key) == true) {
+                return false;
+            } else {
+                leaf_node_p = (static_cast<BwDeltaNode *>(leaf_node_p))->child_node;
+            }
+        }
+        else if(isBasePage(leaf_node_p)) {
+            // The last step is to search the key in the leaf, and we search
+            // for the key in leaf page
+            // TODO: Add support for duplicated key
+            base_page_p = static_cast<BwLeafNode *>(leaf_node_p);
+            return base_page_p->find(key);
+        }
+        else {
+            assert(false);
+        }
+    }
+
+    // Should not reach here
+    assert(false);
+    return false;
   }
 
+  /*
+   * erase() - Delete a key-value pair from the tree
+   *
+   * Since there could be duplicated keys, we need to
+   * specify the data item locate the record for deletion
+   */
   bool erase(const KeyType& key, const ValueType& value) {
     // First reach the leaf page where the key should be inserted
     PID page_pid = findLeafPage(key);
@@ -283,6 +349,20 @@ class BWTree {
 
   bool isLeaf(BwNode* n);
   bool isLeafPID(PID pid);
+
+  // Below three methods are inline helper functions
+  // to help identification of different type of leaf nodes
+  bool isDeltaInsert(BwNode *node_p) {
+    return node_p->type == deltaInsert;
+  }
+
+  bool isDeltaDelete(BwNode *node_p) {
+    return node_p->type == deltaDelete;
+  }
+
+  bool isBasePage(BwNode *node_p) {
+    return node_p->type == leaf;
+  }
 
   PID findLeafPage(const KeyType& key);
 
