@@ -54,7 +54,7 @@ class BWTree {
         InstallDeltaResult result = installDeltaInsert(page_pid, key, value);
         if(result == install_need_consolidate) {
             insert_success = false;
-            bool consolidation_success = false;//consolidateLeafNode(page_pid);
+            bool consolidation_success = consolidateLeafNode(page_pid);
 
             // If consolidation fails then we know some other thread
             // has performed consolidation for us
@@ -451,7 +451,7 @@ class BWTree {
 }  // End peloton namespace
 
 // Template definitions
-#include <unordered_set>
+#include <set>
 #include <cassert>
 
 namespace peloton {
@@ -656,12 +656,24 @@ std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
+struct LessFn {
+  LessFn(const KeyComparator& comp) : m_key_less(comp) {}
+  bool operator() (const std::pair<KeyType, ValueType>& l,
+                   const std::pair<KeyType, ValueType>& r) const {
+    return m_key_less(std::get<0>(l), std::get<0>(r));
+  }
+  const KeyComparator& m_key_less;
+};
+
+template <typename KeyType, typename ValueType, class KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
     BwNode* original_node, std::vector<BwNode*>& garbage_nodes,
     std::vector<std::pair<KeyType, ValueType>>& data, PID& sibling,
     bool& has_merge, BwNode*& merge_node) {
-  std::unordered_set<std::pair<KeyType, ValueType>> insert_records;
-  std::unordered_set<std::pair<KeyType, ValueType>> delete_records;
+  using LessFnT = LessFn<KeyType, ValueType, KeyComparator>;
+  LessFnT less_fn(m_key_less);
+  std::set<std::pair<KeyType, ValueType>, LessFnT> insert_records(less_fn);
+  std::set<std::pair<KeyType, ValueType>, LessFnT> delete_records(less_fn);
 
   bool has_split = false;
   KeyType split_separator_key;
@@ -731,7 +743,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
     sibling = leaf_node->next;
   }
 
-  for (std::pair<KeyType, ValueType>& tuple : leaf_node->data) {
+  for (const std::pair<KeyType, ValueType>& tuple : leaf_node->data) {
     auto it = delete_records.find(tuple);
     if (it != delete_records.end()) {
       // Deleting to ensure correctness but not necessary
@@ -749,13 +761,13 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
   assert(delete_records.empty());
 
   // Insert only new records before the split
-  for (std::pair<KeyType, ValueType>& tuple : insert_records) {
+  for (const std::pair<KeyType, ValueType>& tuple : insert_records) {
     if (!has_split || key_less(std::get<0>(tuple), split_separator_key)) {
       data.push_back(tuple);
     }
   }
   // This is not very efficient, but ok for now
-  std::sort(data.begin(), data.end(), BwLeafNode::comp_data);
+  std::sort(data.begin(), data.end(), less_fn);
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
