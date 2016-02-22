@@ -155,7 +155,7 @@ class BWTree {
         if(result == install_need_consolidate) {
             delete_success = false;
 
-            //consolidateLeafNode(page_pid);
+            consolidateLeafNode(page_pid);
         } else if(result == install_try_again) {
             delete_success = false;
         } else if(result == install_success) {
