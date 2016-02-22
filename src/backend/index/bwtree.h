@@ -70,42 +70,6 @@ class BWTree {
     BwNode* leaf_node_p = mapping_table[page_pid].load();
     assert(leaf_node_p != nullptr);
 
-<<<<<<< HEAD
-    // They are used in different branches
-    BwDeltaInsertNode *insert_page_p = nullptr;
-    BwDeltaDeleteNode *delete_page_p = nullptr;
-    BwLeafNode *base_page_p = nullptr;
-    std::pair<KeyType, ValueType> *pair_p = nullptr;
-
-    while(1) {
-        if(isDeltaInsert(leaf_node_p)) {
-            insert_page_p = static_cast<BwDeltaInsertNode *>(leaf_node_p);
-
-            // If we see an insert node first, then this implies that the
-            // key does exist in the future comsolidated version of the page
-            if(key_equal(insert_page_p->ins_record.first, key) == true) {
-                return true;
-            } else {
-                leaf_node_p = (static_cast<BwDeltaNode *>(leaf_node_p))->child_node;
-            }
-        }
-        else if(isDeltaDelete(leaf_node_p)) {
-            delete_page_p = static_cast<BwDeltaDeleteNode *>(leaf_node_p);
-
-            // For delete record it implies the node has been removed
-            if(key_equal(delete_page_p->del_record.first, key) == true) {
-                return false;
-            } else {
-                leaf_node_p = (static_cast<BwDeltaNode *>(leaf_node_p))->child_node;
-            }
-        }
-        else if(isBasePage(leaf_node_p)) {
-            // The last step is to search the key in the leaf, and we search
-            // for the key in leaf page
-            // TODO: Add support for duplicated key
-            base_page_p = static_cast<BwLeafNode *>(leaf_node_p);
-            return base_page_p->find(key);
-=======
     BwDeltaInsertNode* insert_page_p = nullptr;
     BwDeltaDeleteNode* delete_page_p = nullptr;
     BwLeafNode* base_page_p = nullptr;
@@ -121,7 +85,6 @@ class BWTree {
           return true;
         } else {
           leaf_node_p = (static_cast<BwDeltaNode*>(leaf_node_p))->child_node;
->>>>>>> ebfdbe5a6fbbb1138044e1a1a616080f4e3facfd
         }
       } else if (isDeltaDelete(leaf_node_p)) {
         delete_page_p = static_cast<BwDeltaDeleteNode*>(leaf_node_p);
