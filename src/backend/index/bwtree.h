@@ -63,12 +63,14 @@ class BWTree {
    * test, since duplicated keys might span multiple pages
    */
   bool exists(const KeyType& key) {
+    // Find the first page where the key lies in
     PID page_pid = findLeafPage(key);
     assert(isLeafPID(page_pid));
 
     BwNode *leaf_node_p = mapping_table[page_pid].load();
     assert(leaf_node_p != nullptr);
 
+    // They are used in different branches
     BwDeltaInsertNode *insert_page_p = nullptr;
     BwDeltaDeleteNode *delete_page_p = nullptr;
     BwLeafNode *base_page_p = nullptr;
