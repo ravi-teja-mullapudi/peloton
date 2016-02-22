@@ -24,13 +24,19 @@ namespace index {
 // peloton/third_party/stx/btree.h
 template <typename KeyType, typename ValueType, class KeyComparator>
 class BWTree {
+  BWTree() = delete;
  public:
   // TODO: pass a settings structure as we go along instead of
   // passing in individual parameter values
   BWTree(const KeyComparator& _key_comp)
       : current_mapping_table_size(0), next_pid(0), m_key_less(_key_comp) {
     // Initialize an empty tree
-    m_root = this->NONE_PID;
+    BwLeafNode* initial_leaf = new BwLeafNode(KeyType(), NONE_PID);
+    PID leaf_pid = installPage(initial_leaf);
+    BwInnerNode* initial_inner = new BwInnerNode(KeyType(), NONE_PID);
+    PID inner_pid = installPage(initial_inner);
+    initial_inner->separators.push_back({KeyType(), leaf_pid});
+    m_root = inner_pid;
   }
 
   ~BWTree() {
@@ -316,11 +322,13 @@ class BWTree {
    public:
     // Elastic container to allow for separation of consolidation, splitting
     // and merging
-    BwInnerNode(PID _next) : BwNode(PageType::inner), next(_next) {
-      next = _next;
-    }
+    BwInnerNode(KeyType _lower_bound, PID _next)
+        : BwNode(PageType::inner),
+          lower_bound(_lower_bound),
+          next(_next) {}
 
-    PID next;
+    const KeyType lower_bound;
+    const PID next;
     std::vector<std::pair<KeyType, PID>> separators;
   };
 
@@ -328,7 +336,11 @@ class BWTree {
     // Lowest level nodes in the tree which contain the payload/value
     // corresponding to the keys
    public:
-    BwLeafNode(PID _next) : BwNode(PageType::leaf) { next = _next; }
+    BwLeafNode(KeyType _lower_bound,
+               PID _next)
+      : BwNode(PageType::leaf),
+        lower_bound(_lower_bound),
+        next(_next) {}
     // TODO : maybe we need to implement both a left and right pointer for
     // now sticking with just next
     bool comp_data(const std::pair<KeyType, ValueType>& d1,
@@ -341,7 +353,8 @@ class BWTree {
       return std::binary_search(data.begin(), data.end(), key, comp_data);
     }
 
-    PID next;
+    const KeyType lower_bound;
+    const PID next;
     // Elastic container to allow for separation of consolidation, splitting
     // and merging
     std::vector<std::pair<KeyType, ValueType>> data;
@@ -377,14 +390,14 @@ class BWTree {
   void traverseAndConsolidateLeaf(
       BwNode* node, std::vector<BwNode*>& garbage_nodes,
       std::vector<std::pair<KeyType, ValueType>>& data, PID& sibling,
-      bool& has_merge, BwNode*& merge_node);
+      bool& has_merge, BwNode*& merge_node, KeyType& lower_bound);
 
   bool consolidateLeafNode(PID id);
 
   void traverseAndConsolidateInner(
       BwNode* node, std::vector<BwNode*>& garbage_nodes,
       std::vector<std::pair<KeyType, PID>>& separators, PID& sibling,
-      bool& has_merge, BwNode*& merge_node);
+      bool& has_merge, BwNode*& merge_node, KeyType& lower_bound);
 
   bool consolidateInnerNode(PID id);
 
@@ -665,7 +678,7 @@ template <typename KeyType, typename ValueType, class KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
     BwNode* original_node, std::vector<BwNode*>& garbage_nodes,
     std::vector<std::pair<KeyType, ValueType>>& data, PID& sibling,
-    bool& has_merge, BwNode*& merge_node) {
+    bool& has_merge, BwNode*& merge_node, KeyType& lower_bound) {
   using LessFnT = LessFn<KeyType, ValueType, KeyComparator>;
   LessFnT less_fn(m_key_less);
   std::set<std::pair<KeyType, ValueType>, LessFnT> insert_records(less_fn);
@@ -732,6 +745,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
   // node is a leaf node
   BwLeafNode* leaf_node = static_cast<BwLeafNode*>(node);
 
+  lower_bound = leaf_node->lower_bound;
   if (has_split) {
     // Change sibling pointer if we did a split
     sibling = new_sibling;
@@ -776,16 +790,18 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
   PID sibling;
   bool has_merge = false;
   BwNode* merge_node = nullptr;
+  KeyType lower_bound;
   traverseAndConsolidateLeaf(original_node, garbage_nodes, data, sibling,
-                             has_merge, merge_node);
+                             has_merge, merge_node, lower_bound);
   if (has_merge) {
     BwNode* dummy_node;
+    KeyType dummy_bound;
     traverseAndConsolidateLeaf(merge_node, garbage_nodes, data, sibling,
-                               has_merge, dummy_node);
+                               has_merge, dummy_node, dummy_bound);
     assert(!has_merge);
   }
 
-  BwLeafNode* consolidated_node = new BwLeafNode(sibling);
+  BwLeafNode* consolidated_node = new BwLeafNode(lower_bound, sibling);
   consolidated_node->data.swap(data);
 
   bool result = mapping_table[id].compare_exchange_strong(original_node,
@@ -803,7 +819,7 @@ template <typename KeyType, typename ValueType, class KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
     BwNode* original_node, std::vector<BwNode*>& garbage_nodes,
     std::vector<std::pair<KeyType, PID>>& separators, PID& sibling,
-    bool& has_merge, BwNode*& merge_node) {
+    bool& has_merge, BwNode*& merge_node, KeyType& lower_bound) {
   std::vector<std::pair<KeyType, PID>> insert_separators;
   std::vector<std::pair<KeyType, PID>> delete_separators;
 
@@ -874,6 +890,8 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
 
   BwInnerNode* inner_node = static_cast<BwInnerNode*>(node);
 
+  lower_bound = inner_node->lower_bound;
+
   typename std::vector<std::pair<KeyType, PID>>::iterator base_end;
   if (has_split) {
     // Find end of separators if split
@@ -920,16 +938,18 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(PID id) {
   PID sibling;
   bool has_merge = false;
   BwNode* merge_node = nullptr;
+  KeyType lower_bound;
   traverseAndConsolidateInner(original_node, garbage_nodes, separators, sibling,
-                              has_merge, merge_node);
+                              has_merge, merge_node, lower_bound);
   if (has_merge) {
     BwNode* dummy_node;
+    KeyType dummy_bound;
     traverseAndConsolidateInner(merge_node, garbage_nodes, separators, sibling,
-                                has_merge, dummy_node);
+                                has_merge, dummy_node, dummy_bound);
     assert(!has_merge);
   }
 
-  BwInnerNode* consolidated_node = new BwInnerNode(sibling);
+  BwInnerNode* consolidated_node = new BwInnerNode(lower_bound, sibling);
   consolidated_node->separators.swap(separators);
 
   bool result = mapping_table[id].compare_exchange_strong(original_node,
