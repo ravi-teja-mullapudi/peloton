@@ -459,6 +459,10 @@ namespace index {
 /*
  * isLeaf() - Returns true if the BwNode * refers to a leaf page
  * or its delta page
+ *
+ * NOTE & TODO: Currently this function is incorrect, as we need to traverse
+ * the delta chain to the base page because of ambiguity caused by deltasplit,
+ * delta merge and deltaremove
  */
 template <typename KeyType, typename ValueType, class KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::isLeaf(BwNode* n) {
