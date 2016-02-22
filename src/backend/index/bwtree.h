@@ -197,9 +197,6 @@ class BWTree {
     // Page type
     deltaInsert,
     deltaDelete,
-    deltaLeafSplit,
-    deltaLeafMerge,
-    deltaLeafRemove,
     // Inner type
     deltaSplit,
     deltaIndexTermInsert,
@@ -469,11 +466,6 @@ bool BWTree<KeyType, ValueType, KeyComparator>::isLeaf(BwNode* n) {
   switch (n->type) {
     case deltaDelete:
     case deltaInsert:
-    // Leaf SMO delta node
-    // Everytime we see this just consolidate and try again
-    case deltaLeafSplit:
-    case deltaLeafMerge:
-    case deltaLeafRemove:
     case leaf:
       is_leaf = true;
     case deltaSplit:
@@ -982,9 +974,9 @@ BWTree<KeyType, ValueType, KeyComparator>::installDeltaInsert(
 
     BwNode *old_leaf_p = mapping_table[leaf_pid].load();
 
-    if(old_leaf_p->type == PageType::deltaLeafMerge ||
-       old_leaf_p->type == PageType::deltaLeafRemove ||
-       old_leaf_p->type == PageType::deltaLeafSplit) {
+    if(old_leaf_p->type == PageType::deltaMerge ||
+       old_leaf_p->type == PageType::deltaRemove ||
+       old_leaf_p->type == PageType::deltaSplit) {
             return install_need_consolidate;
     }
 
@@ -1017,9 +1009,9 @@ BWTree<KeyType, ValueType, KeyComparator>::installDeltaDelete(
 
     BwNode *old_leaf_p = mapping_table[leaf_pid].load();
 
-    if(old_leaf_p->type == PageType::deltaLeafMerge ||
-       old_leaf_p->type == PageType::deltaLeafRemove ||
-       old_leaf_p->type == PageType::deltaLeafSplit) {
+    if(old_leaf_p->type == PageType::deltaMerge ||
+       old_leaf_p->type == PageType::deltaRemove ||
+       old_leaf_p->type == PageType::deltaSplit) {
             return install_need_consolidate;
     }
 
