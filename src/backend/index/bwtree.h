@@ -43,12 +43,37 @@ class BWTree {
    * NOTE: No duplicated key support
    */
   bool insert(const KeyType& key, const ValueType& value) {
-    // First reach the leaf page where the key should be inserted
-    PID page_pid = findLeafPage(key);
-    assert(isLeafPID(page_pid));
+    bool insert_success;
 
-    // Then install an insertion record
-    installDeltaInsert(page_pid, key, value);
+    do {
+        // First reach the leaf page where the key should be inserted
+        PID page_pid = findLeafPage(key);
+        assert(isLeafPID(page_pid));
+
+        // Then install an insertion record
+        InstallDeltaResult result = installDeltaInsert(page_pid, key, value);
+        if(result == install_need_consolidate) {
+            insert_success = false;
+            bool consolidation_success = false;//consolidateLeafNode(page_pid);
+
+            // If consolidation fails then we know some other thread
+            // has performed consolidation for us
+            // and we just try again
+            if(consolidation_success == false) {
+                // DON'T KNOW WHAT TO DO
+                // TODO: ...
+            }
+        } else if(result == install_try_again) {
+            // Don't need consolidate, but some other threads has
+            // changed the delta chain
+            insert_success = false;
+        } else if(result == install_success) {
+            // This branch should be the majority
+            insert_success = true;
+        } else {
+            assert(false);
+        }
+    } while(insert_success == false);
 
     return true;
   }
@@ -118,13 +143,27 @@ class BWTree {
    * specify the data item locate the record for deletion
    */
   bool erase(const KeyType& key, const ValueType& value) {
-    // First reach the leaf page where the key should be inserted
-    PID page_pid = findLeafPage(key);
-    assert(isLeafPID(page_pid));
+    bool delete_success;
 
-    // NOTE: Since there could be multiple keys with different value
-    // we need also to specify a value for deletion
-    installDeltaDelete(page_pid, key, value);
+    do {
+        // First reach the leaf page where the key should be inserted
+        PID page_pid = findLeafPage(key);
+        assert(isLeafPID(page_pid));
+
+        // Then install an insertion record
+        InstallDeltaResult result = installDeltaDelete(page_pid, key, value);
+        if(result == install_need_consolidate) {
+            delete_success = false;
+
+            //consolidateLeafNode(page_pid);
+        } else if(result == install_try_again) {
+            delete_success = false;
+        } else if(result == install_success) {
+            delete_success = true;
+        } else {
+            assert(false);
+        }
+    } while(delete_success == false);
 
     return true;
   }
@@ -158,12 +197,21 @@ class BWTree {
     // Page type
     deltaInsert,
     deltaDelete,
+    deltaLeafSplit,
+    deltaLeafMerge,
+    deltaLeafRemove,
     // Inner type
     deltaSplit,
     deltaIndexTermInsert,
     deltaIndexTermDelete,
     deltaRemove,
     deltaMerge,
+  };
+
+  enum InstallDeltaResult {
+    install_success,
+    install_try_again,
+    install_need_consolidate,
   };
 
   class BwNode {
@@ -373,11 +421,13 @@ class BWTree {
   // This only applies to leaf node - For intermediate nodes
   // the insertion of sep/child pair must be done using different
   // insertion method
-  void installDeltaInsert(PID leaf_pid, const KeyType& key,
-                          const ValueType& value);
+  InstallDeltaResult installDeltaInsert(PID leaf_pid,
+                                        const KeyType& key,
+                                        const ValueType& value);
 
-  void installDeltaDelete(PID leaf_pid, const KeyType& key,
-                          const ValueType& value);
+  InstallDeltaResult installDeltaDelete(PID leaf_pid,
+                                        const KeyType& key,
+                                        const ValueType& value);
 
   // TODO: Add a global garbage vector per epoch using a lock
 
@@ -419,6 +469,11 @@ bool BWTree<KeyType, ValueType, KeyComparator>::isLeaf(BwNode* n) {
   switch (n->type) {
     case deltaDelete:
     case deltaInsert:
+    // Leaf SMO delta node
+    // Everytime we see this just consolidate and try again
+    case deltaLeafSplit:
+    case deltaLeafMerge:
+    case deltaLeafRemove:
     case leaf:
       is_leaf = true;
     case deltaSplit:
@@ -906,49 +961,69 @@ BWTree<KeyType, ValueType, KeyComparator>::installPage(BwNode* new_node_p) {
   return assigned_pid;
 }
 
-template <typename KeyType, typename ValueType, class KeyComparator>
-void BWTree<KeyType, ValueType, KeyComparator>::installDeltaInsert(
+template <typename KeyType, typename ValueType, typename KeyComparator>
+typename BWTree<KeyType, ValueType, KeyComparator>::InstallDeltaResult
+BWTree<KeyType, ValueType, KeyComparator>::installDeltaInsert(
     PID leaf_pid, const KeyType& key, const ValueType& value) {
-  // We could only use BwNode * since it is the
-  // type of mapping table
-  BwNode* old_leaf_p = mapping_table[leaf_pid].load();
+    bool cas_success;
+    auto ins_record = std::pair<KeyType, ValueType>(key, value);
 
-  // We must be working on a leaf page
-  // This includes base page, delete page, insert page and modify page
-  assert(isLeaf(old_leaf_p));
+    BwNode *old_leaf_p = mapping_table[leaf_pid].load();
 
-  // Construct a new key-value pair and construct a new insert delta node
-  auto ins_record = std::pair<KeyType, ValueType>(key, value);
-  BwNode* new_leaf_p = (BwNode*)new BwDeltaInsertNode(old_leaf_p, ins_record);
+    if(old_leaf_p->type == PageType::deltaLeafMerge ||
+       old_leaf_p->type == PageType::deltaLeafRemove ||
+       old_leaf_p->type == PageType::deltaLeafSplit) {
+            return install_need_consolidate;
+    }
 
-  // If this fails we must keep trying
-  while (!mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p,
-                                                          new_leaf_p)) {
-    // In most cases it should not reach here. If it does
-    // then the leaf page has been changed, and in that case
-    // we just re-read the page and try again
-    old_leaf_p = mapping_table[leaf_pid].load();
-  }
+    // We must be working on a leaf page
+    // This includes base page, delete page and insert page
+    assert(isLeaf(old_leaf_p));
 
-  return;
+    BwNode* new_leaf_p = (BwNode*)new BwDeltaInsertNode(old_leaf_p, ins_record);
+
+    // Either the page has been consolidated, in which case we try again,
+    // or the page has been appended another record, in which case we also
+    // try again
+    cas_success = \
+        mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p,
+                                                        new_leaf_p);
+    if(cas_success == false) {
+        delete new_leaf_p;
+        return install_try_again;
+    }
+
+    return install_success;
 }
 
-template <typename KeyType, typename ValueType, class KeyComparator>
-void BWTree<KeyType, ValueType, KeyComparator>::installDeltaDelete(
+template <typename KeyType, typename ValueType, typename KeyComparator>
+typename BWTree<KeyType, ValueType, KeyComparator>::InstallDeltaResult
+BWTree<KeyType, ValueType, KeyComparator>::installDeltaDelete(
     PID leaf_pid, const KeyType& key, const ValueType& value) {
-  BwNode* old_leaf_p = mapping_table[leaf_pid].load();
-  assert(isLeaf(old_leaf_p));
+    bool cas_success;
+    auto delete_record = std::pair<KeyType, ValueType>(key, value);
 
-  auto delete_record = std::pair<KeyType, ValueType>(key, value);
-  BwNode* new_leaf_p =
-      (BwNode*)new BwDeltaDeleteNode(old_leaf_p, delete_record);
+    BwNode *old_leaf_p = mapping_table[leaf_pid].load();
 
-  while (!mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p,
-                                                          new_leaf_p)) {
-    old_leaf_p = mapping_table[leaf_pid].load();
-  }
+    if(old_leaf_p->type == PageType::deltaLeafMerge ||
+       old_leaf_p->type == PageType::deltaLeafRemove ||
+       old_leaf_p->type == PageType::deltaLeafSplit) {
+            return install_need_consolidate;
+    }
 
-  return;
+    assert(isLeaf(old_leaf_p));
+
+    BwNode* new_leaf_p = (BwNode*)new BwDeltaDeleteNode(old_leaf_p, delete_record);
+
+    cas_success = \
+        mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p,
+                                                        new_leaf_p);
+    if(cas_success == false) {
+        delete new_leaf_p;
+        return install_try_again;
+    }
+
+    return install_success;
 }
 
 }  // End index namespace
