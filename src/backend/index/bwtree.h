@@ -17,6 +17,35 @@
 #include <algorithm>
 #include <cassert>
 
+#define BWTREE_DEBUG
+
+#ifdef BWTREE_DEBUG
+
+#define bwt_printf(fmt, ...) do { printf("%-24s(): " fmt, __FUNCTION__, ## __VA_ARGS__); }while(0);
+#define bwt_printf_red(fmt, ...) do { printf("\033[1;31m%-24s(): " fmt "\033[0m", \
+                                             __FUNCTION__, ## __VA_ARGS__); }while(0);
+#define bwt_printf_redb(fmt, ...) do { printf("\033[1;41m%-24s(): " fmt "\033[0m", \
+                                              __FUNCTION__, ## __VA_ARGS__); }while(0);
+#define bwt_printf_green(fmt, ...) do { printf("\033[1;32m%-24s(): " fmt "\033[0m", \
+                                               __FUNCTION__, ## __VA_ARGS__); }while(0);
+#define bwt_printf_greenb(fmt, ...) do { printf("\033[1;42m%-24s(): " fmt "\033[0m", \
+                                                __FUNCTION__, ## __VA_ARGS__); }while(0);
+#define bwt_printf_blue(fmt, ...) do { printf("\033[1;34m%-24s(): " fmt "\033[0m", \
+                                              __FUNCTION__, ## __VA_ARGS__); }while(0);
+#define bwt_printf_blueb(fmt, ...) do { printf("\033[1;44m%-24s(): " fmt "\033[0m", \
+                                               __FUNCTION__, ## __VA_ARGS__); }while(0);
+#else
+
+#define bwt_printf(args...) do {}while(0);
+#define bwt_printf_red(fmt, ...) do {}while(0);
+#define bwt_printf_redb(fmt, ...) do {}while(0);
+#define bwt_printf_green(fmt, ...) do {}while(0);
+#define bwt_printf_greenb(fmt, ...) do {}while(0);
+#define bwt_printf_blue(fmt, ...) do {}while(0);
+#define bwt_printf_blueb(fmt, ...) do {}while(0);
+
+#endif
+
 namespace peloton {
 namespace index {
 
@@ -268,12 +297,12 @@ class BWTree {
 
     // Check if a key exists in the node
     bool find(const KeyType& key) {
-      printf("LeafNode.find(%d)\n", key);
+      bwt_printf("LeafNode.find(%d)\n", key);
       for (int i = 0; i < data.size(); i++) {
         if (key_equal(data[i].first, key)) return true;
       }
 
-      printf("LeafNode.find() returns false\n");
+      bwt_printf("LeafNode.find() returns false\n");
       return false;
 
       // Uncomment this in the future
@@ -435,8 +464,8 @@ BWTree<KeyType, ValueType, KeyComparator>::BWTree(KeyComparator _m_key_less)
 
   m_root = inner_pid;
 
-  printf("Init: Initializer returns. Leaf = %u, inner = %u\n", leaf_pid,
-         inner_pid);
+  bwt_printf("Init: Initializer returns. Leaf = %u, inner = %u\n", leaf_pid,
+             inner_pid);
 
   return;
 }
@@ -501,7 +530,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::isLeafPID(PID pid) {
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
-  printf("exists(): key = %d\n", key);
+  bwt_printf("key = %d\n", key);
   // Find the first page where the key lies in
   PID page_pid = findLeafPage(key);
   assert(isLeafPID(page_pid));
@@ -518,7 +547,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
     if (isDeltaInsert(leaf_node_p)) {
       insert_page_p = static_cast<BwDeltaInsertNode*>(leaf_node_p);
 
-      printf("exists(): See DeltaInsert Page: %d\n",
+      bwt_printf("See DeltaInsert Page: %d\n",
              insert_page_p->ins_record.first);
 
       // If we see an insert node first, then this implies that the
@@ -645,7 +674,7 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
   while (1) {
     assert(curr_node != nullptr);
     if (curr_node->type == PageType::inner) {
-      printf("findLeafPage(): Current page is inner\n");
+      bwt_printf("Current page is inner\n");
 
       BwInnerNode* inner_node = static_cast<BwInnerNode*>(curr_node);
       assert(inner_node->separators.size() > 0);
@@ -653,7 +682,7 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
       // TODO Change this to binary search
       bool found_sep = false;
       for (int i = 1; i < inner_node->separators.size(); i++) {
-        printf("Inside for loop, i = %d\n", i);
+        bwt_printf("Inside for loop, i = %d\n", i);
 
         if (key_less(inner_node->separators[i - 1].first, key) &&
             key_less(inner_node->separators[i].first, key)) {
@@ -666,10 +695,10 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
       }
 
       if (!found_sep) {
-        printf("Did not find sep\n");
+        bwt_printf("Did not find sep\n");
 
         if (inner_node->next == this->NONE_PID) {
-          printf("inner_node->next == NONE PID\n");
+          bwt_printf("inner_node->next == NONE PID\n");
 
           curr_pid = inner_node->separators.back().second;
         } else {
@@ -745,16 +774,16 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
         assert(curr_node != nullptr);
       }
     } else if (curr_node->type == PageType::leaf) {
-      printf("Is a leaf node\n");
+      bwt_printf("Is a leaf node\n");
 
       BwLeafNode* leaf_node = static_cast<BwLeafNode*>(curr_node);
 
-      printf("leaf_node_size = %lu\n", leaf_node->data.size());
+      bwt_printf("leaf_node_size = %lu\n", leaf_node->data.size());
 
       if (leaf_node->data.size() == 0 ||
           key_lessequal(key, leaf_node->data.back().first) ||
           leaf_node->next == this->NONE_PID) {
-        printf("key <= first in the leaf, or next leaf == NONE PID, Break!\n");
+        bwt_printf("key <= first in the leaf, or next leaf == NONE PID, Break!\n");
 
         break;
       } else {
@@ -1204,3 +1233,4 @@ BWTree<KeyType, ValueType, KeyComparator>::installDeltaDelete(
 
 }  // End index namespace
 }  // End peloton namespace
+
