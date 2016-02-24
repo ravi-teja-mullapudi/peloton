@@ -54,7 +54,7 @@ namespace index {
 template <typename KeyType, typename ValueType, typename KeyComparator>
 class BWTree {
  private:
-  using PID = uint32_t;
+  using PID = uint64_t;
 
   constexpr static PID NONE_PID = std::numeric_limits<PID>::max();
   constexpr static unsigned int max_table_size = 1 << 24;
@@ -464,7 +464,7 @@ BWTree<KeyType, ValueType, KeyComparator>::BWTree(KeyComparator _m_key_less)
 
   m_root = inner_pid;
 
-  bwt_printf("Init: Initializer returns. Leaf = %u, inner = %u\n", leaf_pid,
+  bwt_printf("Init: Initializer returns. Leaf = %lu, inner = %lu\n", leaf_pid,
              inner_pid);
 
   return;
