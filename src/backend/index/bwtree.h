@@ -483,22 +483,25 @@ BWTree<KeyType, ValueType, KeyComparator>::~BWTree() {
  * isLeaf() - Returns true if the BwNode * refers to a leaf page
  * or its delta page
  *
- * NOTE & TODO: Currently this function is incorrect, as we need to traverse
- * the delta chain to the base page because of ambiguity caused by deltasplit,
- * delta merge and deltaremove
+ * NOTE: The function traverse delta chain to the base in order
+ * to decide the type of node we are currently on, since split and merge
+ * nodes could appear on both inner delta chain and leaf delta chain
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::isLeaf(BwNode* n) {
-  bool is_leaf = false;
+  // First we traverse down to the base page
+  while((n->type != leaf) && (n->type != inner)) {
+    BwDeltaNode *delta_node_p = static_cast<BwDeltaNode*>(n);
+    n = delta_node_p->child_node;
+  }
+
+  bool is_leaf;
   switch (n->type) {
-    case deltaDelete:
-    case deltaInsert:
     case leaf:
       is_leaf = true;
-    case deltaSplit:
-    case deltaIndexTermInsert:
-    case deltaIndexTermDelete:
+      break;
     case inner:
+      is_leaf = false;
       break;
     default:
       assert(false);
