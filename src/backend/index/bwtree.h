@@ -21,28 +21,57 @@
 
 #ifdef BWTREE_DEBUG
 
-#define bwt_printf(fmt, ...) do { printf("%-24s(): " fmt, __FUNCTION__, ## __VA_ARGS__); }while(0);
-#define bwt_printf_red(fmt, ...) do { printf("\033[1;31m%-24s(): " fmt "\033[0m", \
-                                             __FUNCTION__, ## __VA_ARGS__); }while(0);
-#define bwt_printf_redb(fmt, ...) do { printf("\033[1;41m%-24s(): " fmt "\033[0m", \
-                                              __FUNCTION__, ## __VA_ARGS__); }while(0);
-#define bwt_printf_green(fmt, ...) do { printf("\033[1;32m%-24s(): " fmt "\033[0m", \
-                                               __FUNCTION__, ## __VA_ARGS__); }while(0);
-#define bwt_printf_greenb(fmt, ...) do { printf("\033[1;42m%-24s(): " fmt "\033[0m", \
-                                                __FUNCTION__, ## __VA_ARGS__); }while(0);
-#define bwt_printf_blue(fmt, ...) do { printf("\033[1;34m%-24s(): " fmt "\033[0m", \
-                                              __FUNCTION__, ## __VA_ARGS__); }while(0);
-#define bwt_printf_blueb(fmt, ...) do { printf("\033[1;44m%-24s(): " fmt "\033[0m", \
-                                               __FUNCTION__, ## __VA_ARGS__); }while(0);
+#define bwt_printf(fmt, ...)                              \
+  do {                                                    \
+    printf("%-24s(): " fmt, __FUNCTION__, ##__VA_ARGS__); \
+  } while (0);
+#define bwt_printf_red(fmt, ...)                                              \
+  do {                                                                        \
+    printf("\033[1;31m%-24s(): " fmt "\033[0m", __FUNCTION__, ##__VA_ARGS__); \
+  } while (0);
+#define bwt_printf_redb(fmt, ...)                                             \
+  do {                                                                        \
+    printf("\033[1;41m%-24s(): " fmt "\033[0m", __FUNCTION__, ##__VA_ARGS__); \
+  } while (0);
+#define bwt_printf_green(fmt, ...)                                            \
+  do {                                                                        \
+    printf("\033[1;32m%-24s(): " fmt "\033[0m", __FUNCTION__, ##__VA_ARGS__); \
+  } while (0);
+#define bwt_printf_greenb(fmt, ...)                                           \
+  do {                                                                        \
+    printf("\033[1;42m%-24s(): " fmt "\033[0m", __FUNCTION__, ##__VA_ARGS__); \
+  } while (0);
+#define bwt_printf_blue(fmt, ...)                                             \
+  do {                                                                        \
+    printf("\033[1;34m%-24s(): " fmt "\033[0m", __FUNCTION__, ##__VA_ARGS__); \
+  } while (0);
+#define bwt_printf_blueb(fmt, ...)                                            \
+  do {                                                                        \
+    printf("\033[1;44m%-24s(): " fmt "\033[0m", __FUNCTION__, ##__VA_ARGS__); \
+  } while (0);
 #else
 
-#define bwt_printf(args...) do {}while(0);
-#define bwt_printf_red(fmt, ...) do {}while(0);
-#define bwt_printf_redb(fmt, ...) do {}while(0);
-#define bwt_printf_green(fmt, ...) do {}while(0);
-#define bwt_printf_greenb(fmt, ...) do {}while(0);
-#define bwt_printf_blue(fmt, ...) do {}while(0);
-#define bwt_printf_blueb(fmt, ...) do {}while(0);
+#define bwt_printf(args...) \
+  do {                      \
+  } while (0);
+#define bwt_printf_red(fmt, ...) \
+  do {                           \
+  } while (0);
+#define bwt_printf_redb(fmt, ...) \
+  do {                            \
+  } while (0);
+#define bwt_printf_green(fmt, ...) \
+  do {                             \
+  } while (0);
+#define bwt_printf_greenb(fmt, ...) \
+  do {                              \
+  } while (0);
+#define bwt_printf_blue(fmt, ...) \
+  do {                            \
+  } while (0);
+#define bwt_printf_blueb(fmt, ...) \
+  do {                             \
+  } while (0);
 
 #endif
 
@@ -490,8 +519,8 @@ BWTree<KeyType, ValueType, KeyComparator>::~BWTree() {
 template <typename KeyType, typename ValueType, typename KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::isLeaf(BwNode* n) {
   // First we traverse down to the base page
-  while((n->type != leaf) && (n->type != inner)) {
-    BwDeltaNode *delta_node_p = static_cast<BwDeltaNode*>(n);
+  while ((n->type != leaf) && (n->type != inner)) {
+    BwDeltaNode* delta_node_p = static_cast<BwDeltaNode*>(n);
     n = delta_node_p->child_node;
   }
 
@@ -546,12 +575,23 @@ bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
   BwLeafNode* base_page_p = nullptr;
   std::pair<KeyType, ValueType>* pair_p = nullptr;
 
+  // TODO:
+
+  // Track parent
+  // Track current delta chain length
+  // Trigger consolidation
+
+  // Trigger structure modifying operations
+  // split, remove, merge
+
+  // Note: should not trigger a remove on the left most leaf even if the
+  // number of tuples is below a threshold
+
   while (1) {
     if (isDeltaInsert(leaf_node_p)) {
       insert_page_p = static_cast<BwDeltaInsertNode*>(leaf_node_p);
 
-      bwt_printf("See DeltaInsert Page: %d\n",
-             insert_page_p->ins_record.first);
+      bwt_printf("See DeltaInsert Page: %d\n", insert_page_p->ins_record.first);
 
       // If we see an insert node first, then this implies that the
       // key does exist in the future comsolidated version of the page
@@ -786,7 +826,8 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
       if (leaf_node->data.size() == 0 ||
           key_lessequal(key, leaf_node->data.back().first) ||
           leaf_node->next == this->NONE_PID) {
-        bwt_printf("key <= first in the leaf, or next leaf == NONE PID, Break!\n");
+        bwt_printf(
+            "key <= first in the leaf, or next leaf == NONE PID, Break!\n");
 
         break;
       } else {
@@ -1236,4 +1277,3 @@ BWTree<KeyType, ValueType, KeyComparator>::installDeltaDelete(
 
 }  // End index namespace
 }  // End peloton namespace
-
