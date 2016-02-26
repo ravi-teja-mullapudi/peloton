@@ -727,8 +727,7 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
       for (int i = 1; i < inner_node->separators.size(); i++) {
         bwt_printf("Inside for loop, i = %d\n", i);
 
-        if (key_less(inner_node->separators[i - 1].first, key) &&
-            key_less(inner_node->separators[i].first, key)) {
+        if (key_less(inner_node->separators[i].first, key)) {
           continue;
         } else {
           found_sep = true;
