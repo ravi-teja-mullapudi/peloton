@@ -97,6 +97,9 @@ class BWTree {
   // Node sizes for triggering splits and merges on leaf nodes
   constexpr static unsigned int leaf_node_size_min = 8;
   constexpr static unsigned int leaf_node_size_max = 16;
+  // Debug constant: The maximum number of iterations we could do
+  // It prevents dead loop hopefully
+  constexpr static int iter_max = 99999;
 
   // Enumeration of the types of nodes required in updating both the values
   // and the index in the Bw Tree. Currently only adding node types for
@@ -109,7 +112,7 @@ class BWTree {
     // Page type
     deltaInsert,
     deltaDelete,
-    // Inner type
+    // Inner type & page type
     deltaSplit,
     deltaIndexTermInsert,
     deltaIndexTermDelete,
@@ -348,6 +351,7 @@ class BWTree {
   bool consolidateInnerNode(PID id);
 
   bool isLeaf(BwNode* n);
+  bool isLeafSMO(BwNode *n);
   bool isLeafPID(PID pid);
 
   // Below three methods are inline helper functions
@@ -453,6 +457,27 @@ BWTree<KeyType, ValueType, KeyComparator>::~BWTree() {
 }
 
 /*
+ * isLeafSMO() - Returns true if the target is a SMO operation on leaf page
+ *
+ * We maintain the invariant that if SMO is going to appear in delta chian,
+ * then it must be the first on it. Every routine that sees an SMO on leaf delta
+ * must then consolidate it in order to append new delta record
+ *
+ * SMOs that could appear in leaf delta chian: (ziqi: Please correct me if I'm wrong)
+ *   - deltaSplit
+ *   - deltaRemove
+ *   - deltaMerge
+ */
+template <typename KeyType, typename ValueType, typename KeyComparator>
+bool BWTree<KeyType, ValueType, KeyComparator>::isLeafSMO(BwNode* n) {
+  PageType type = n->type;
+  return (type == PageType::deltaSplit) || \
+         (type == PageType::deltaRemove) || \
+         (type == PageType::deltaMerge);
+}
+
+
+/*
  * isLeaf() - Returns true if the BwNode * refers to a leaf page
  * or its delta page
  *
@@ -462,25 +487,48 @@ BWTree<KeyType, ValueType, KeyComparator>::~BWTree() {
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::isLeaf(BwNode* n) {
-  // First we traverse down to the base page
-  while ((n->type != leaf) && (n->type != inner)) {
-    BwDeltaNode* delta_node_p = static_cast<BwDeltaNode*>(n);
-    n = delta_node_p->child_node;
-  }
+  int counter = 0;
 
-  bool is_leaf;
-  switch (n->type) {
-    case leaf:
-      is_leaf = true;
+  BwDeltaMergeNode* merge_delta;
+  BwDeltaRemoveNode* remove_delta;
+  BwDeltaSplitNode* split_delta;
+
+  while(1) {
+    if(counter++ > iter_max) {
+      assert(false);
+    }
+
+    switch(n->type) {
+    case PageType::deltaDelete:
+    case PageType::deltaInsert:
+    case PageType::leaf:
+      return true;
+    case PageType::deltaIndexTermDelete:
+    case PageType::deltaIndexTermInsert:
+    case PageType::inner:
+      return false;
+    case PageType::deltaMerge:
+      // Here is the trick: we know whether we choose child or
+      // merge node the type will be the same
+      merge_delta = static_cast<BwDeltaMergeNode*>(n);
+      n = merge_delta->child_node;
       break;
-    case inner:
-      is_leaf = false;
+    case PageType::deltaRemove:
+      remove_delta = static_cast<BwDeltaRemoveNode*>(n);
+      n = remove_delta->child_node;
+      break;
+    case PageType::deltaSplit:
+      split_delta = static_cast<BwDeltaSplitNode*>(n);
+      n = split_delta->child_node;
       break;
     default:
       assert(false);
+      break;
+    }
   }
 
-  return is_leaf;
+  assert(false);
+  return false;
 }
 
 /*
@@ -526,7 +574,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
       bwt_printf("See DeltaInsert Page: %d\n", insert_page_p->ins_record.first);
 
       // If we see an insert node first, then this implies that the
-      // key does exist in the future comsolidated version of the page
+      // key does exist in the future consolidated version of the page
       if (key_equal(insert_page_p->ins_record.first, key) == true) {
         return true;
       } else {
@@ -1246,3 +1294,4 @@ bool BWTree<KeyType, ValueType, KeyComparator>::mergeInnerNode(PID id) {
 
 }  // End index namespace
 }  // End peloton namespace
+
