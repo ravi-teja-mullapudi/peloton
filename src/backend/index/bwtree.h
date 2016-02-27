@@ -350,19 +350,13 @@ class BWTree {
 
   bool consolidateInnerNode(PID id);
 
-  bool isLeaf(BwNode* n);
-  bool isLeafSMO(BwNode *n);
-  bool isLeafPID(PID pid);
-
-  // Below three methods are inline helper functions
-  // to help identification of different type of leaf nodes
-  bool isDeltaInsert(BwNode* node_p) { return node_p->type == deltaInsert; }
-
-  bool isDeltaDelete(BwNode* node_p) { return node_p->type == deltaDelete; }
+  bool isSMO(BwNode* n);
 
   bool isBasePage(BwNode* node_p) { return node_p->type == leaf; }
 
   PID findLeafPage(const KeyType& key);
+
+  bool installDeltaRemove(PID id);
 
   bool splitInnerNode(PID id);
 
@@ -457,90 +451,23 @@ BWTree<KeyType, ValueType, KeyComparator>::~BWTree() {
 }
 
 /*
- * isLeafSMO() - Returns true if the target is a SMO operation on leaf page
+ * isSMO() - Returns true if the target is a SMO operation on leaf page
  *
  * We maintain the invariant that if SMO is going to appear in delta chian,
  * then it must be the first on it. Every routine that sees an SMO on leaf delta
  * must then consolidate it in order to append new delta record
  *
- * SMOs that could appear in leaf delta chian: (ziqi: Please correct me if I'm wrong)
+ * SMOs that could appear in leaf delta chain: (ziqi: Please correct me if I'm
+ *wrong)
  *   - deltaSplit
  *   - deltaRemove
  *   - deltaMerge
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
-bool BWTree<KeyType, ValueType, KeyComparator>::isLeafSMO(BwNode* n) {
+bool BWTree<KeyType, ValueType, KeyComparator>::isSMO(BwNode* n) {
   PageType type = n->type;
-  return (type == PageType::deltaSplit) || \
-         (type == PageType::deltaRemove) || \
+  return (type == PageType::deltaSplit) || (type == PageType::deltaRemove) ||
          (type == PageType::deltaMerge);
-}
-
-
-/*
- * isLeaf() - Returns true if the BwNode * refers to a leaf page
- * or its delta page
- *
- * NOTE: The function traverse delta chain to the base in order
- * to decide the type of node we are currently on, since split and merge
- * nodes could appear on both inner delta chain and leaf delta chain
- */
-template <typename KeyType, typename ValueType, typename KeyComparator>
-bool BWTree<KeyType, ValueType, KeyComparator>::isLeaf(BwNode* n) {
-  int counter = 0;
-
-  BwDeltaMergeNode* merge_delta;
-  BwDeltaRemoveNode* remove_delta;
-  BwDeltaSplitNode* split_delta;
-
-  while(1) {
-    if(counter++ > iter_max) {
-      assert(false);
-    }
-
-    switch(n->type) {
-    case PageType::deltaDelete:
-    case PageType::deltaInsert:
-    case PageType::leaf:
-      return true;
-    case PageType::deltaIndexTermDelete:
-    case PageType::deltaIndexTermInsert:
-    case PageType::inner:
-      return false;
-    case PageType::deltaMerge:
-      // Here is the trick: we know whether we choose child or
-      // merge node the type will be the same
-      merge_delta = static_cast<BwDeltaMergeNode*>(n);
-      n = merge_delta->child_node;
-      break;
-    case PageType::deltaRemove:
-      remove_delta = static_cast<BwDeltaRemoveNode*>(n);
-      n = remove_delta->child_node;
-      break;
-    case PageType::deltaSplit:
-      split_delta = static_cast<BwDeltaSplitNode*>(n);
-      n = split_delta->child_node;
-      break;
-    default:
-      assert(false);
-      break;
-    }
-  }
-
-  assert(false);
-  return false;
-}
-
-/*
- * isLeafPID() - Returns true if a PID refers to a leaf node
- *
- * It acts as a wrapper to isLeaf(). Please note that even
- * if the PID-pointer relation has changed, identity of leaf
- * will not change
- */
-template <typename KeyType, typename ValueType, class KeyComparator>
-bool BWTree<KeyType, ValueType, KeyComparator>::isLeafPID(PID pid) {
-  return isLeaf(mapping_table[pid].load());
 }
 
 /*
@@ -557,7 +484,6 @@ bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
   bwt_printf("key = %d\n", key);
   // Find the first page where the key lies in
   PID page_pid = findLeafPage(key);
-  assert(isLeafPID(page_pid));
 
   BwNode* leaf_node_p = mapping_table[page_pid].load();
   assert(leaf_node_p != nullptr);
@@ -568,7 +494,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
   std::pair<KeyType, ValueType>* pair_p = nullptr;
 
   while (1) {
-    if (isDeltaInsert(leaf_node_p)) {
+    if (leaf_node_p->type == deltaInsert) {
       insert_page_p = static_cast<BwDeltaInsertNode*>(leaf_node_p);
 
       bwt_printf("See DeltaInsert Page: %d\n", insert_page_p->ins_record.first);
@@ -580,7 +506,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
       } else {
         leaf_node_p = (static_cast<BwDeltaNode*>(leaf_node_p))->child_node;
       }
-    } else if (isDeltaDelete(leaf_node_p)) {
+    } else if (leaf_node_p->type == deltaDelete) {
       delete_page_p = static_cast<BwDeltaDeleteNode*>(leaf_node_p);
 
       // For delete record it implies the node has been removed
@@ -620,7 +546,6 @@ bool BWTree<KeyType, ValueType, KeyComparator>::insert(const KeyType& key,
   do {
     // First reach the leaf page where the key should be inserted
     PID page_pid = findLeafPage(key);
-    assert(isLeafPID(page_pid));
 
     // Then install an insertion record
     InstallDeltaResult result = installDeltaInsert(page_pid, key, value);
@@ -664,7 +589,6 @@ bool BWTree<KeyType, ValueType, KeyComparator>::erase(const KeyType& key,
   do {
     // First reach the leaf page where the key should be inserted
     PID page_pid = findLeafPage(key);
-    assert(isLeafPID(page_pid));
 
     // Then install an insertion record
     InstallDeltaResult result = installDeltaDelete(page_pid, key, value);
@@ -859,8 +783,6 @@ std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
   assert(leaf_page != this->NONE_PID);
 
   BwNode* curr_node = mapping_table[leaf_page].load();
-  // the node should be a leaf node
-  assert(isLeaf(curr_node));
 
   // Check if the node is marked for consolidation, splitting or merging
   // BwNode* next_node = nullptr;
@@ -1218,10 +1140,6 @@ BWTree<KeyType, ValueType, KeyComparator>::installDeltaInsert(
     return install_need_consolidate;
   }
 
-  // We must be working on a leaf page
-  // This includes base page, delete page and insert page
-  assert(isLeaf(old_leaf_p));
-
   BwNode* new_leaf_p = (BwNode*)new BwDeltaInsertNode(old_leaf_p, ins_record);
 
   // Either the page has been consolidated, in which case we try again,
@@ -1251,8 +1169,6 @@ BWTree<KeyType, ValueType, KeyComparator>::installDeltaDelete(
       old_leaf_p->type == PageType::deltaSplit) {
     return install_need_consolidate;
   }
-
-  assert(isLeaf(old_leaf_p));
 
   BwNode* new_leaf_p =
       (BwNode*)new BwDeltaDeleteNode(old_leaf_p, delete_record);
@@ -1294,4 +1210,3 @@ bool BWTree<KeyType, ValueType, KeyComparator>::mergeInnerNode(PID id) {
 
 }  // End index namespace
 }  // End peloton namespace
-
