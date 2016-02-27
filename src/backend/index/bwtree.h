@@ -342,8 +342,8 @@ class BWTree {
 
   void traverseAndConsolidateInner(
       BwNode* node, std::vector<BwNode*>& garbage_nodes,
-      std::vector<std::pair<KeyType, PID>>& separators, PID& sibling,
-      bool& has_merge, BwNode*& merge_node, KeyType& lower_bound);
+      std::vector<std::pair<KeyType, PID>>& separators, bool& has_merge,
+      BwNode*& merge_node, KeyType& lower_bound);
 
   bool consolidateInnerNode(PID id);
 
@@ -360,13 +360,13 @@ class BWTree {
 
   PID findLeafPage(const KeyType& key);
 
-  void splitIndexNode(void);
+  bool splitInnerNode(PID id);
 
-  void splitLeafNode(void);
+  bool splitLeafNode(PID id);
 
-  void mergeInnerNode(void);
+  bool mergeInnerNode(PID id);
 
-  void mergeLeafNode(void);
+  bool mergeLeafNode(PID id);
 
   // Atomically install a page into mapping table
   // NOTE: There are times that new pages are not installed into
@@ -536,6 +536,8 @@ bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
       delete_page_p = static_cast<BwDeltaDeleteNode*>(leaf_node_p);
 
       // For delete record it implies the node has been removed
+      // Ravi: This is wrong in the presence of duplicates you cannot bail out
+      // on seeing one delete in the key
       if (key_equal(delete_page_p->del_record.first, key) == true) {
         return false;
       } else {
@@ -544,9 +546,9 @@ bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
     } else if (isBasePage(leaf_node_p)) {
       // The last step is to search the key in the leaf, and we search
       // for the key in leaf page
-      // TODO: Add support for duplicated key
       base_page_p = static_cast<BwLeafNode*>(leaf_node_p);
-      return base_page_p->find(key);
+      return std::binary_search(base_page_p->data.begin(),
+                                base_page_p->data.end(), key_less);
     } else {
       assert(false);
     }
@@ -669,12 +671,16 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
       assert(inner_node->separators.size() > 0);
 
       if (deltaIndexLen > this->delta_chain_inner_thesh) {
-        // Attempt consolidation
-        // continue;
+        consolidateInnerNode(curr_pid);
+        // Even if the consolidate fails or completes the search needs to
+        // fetch the curr_node from the mapping table
+        curr_node = mapping_table[curr_pid].load();
+        continue;
       }
 
       if (inner_node->separators.size() < this->inner_node_size_min) {
-        // Attempt merge
+        // Install a remove delta on top of the node
+        // curr_node = mapping_table[curr_pid].load();
         // continue;
       }
 
@@ -795,13 +801,6 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
 
   return curr_pid;
 }
-
-/*
- * splitLeafNode() - Find a pivot and post delta record both on
- * the leaf node, and on its parent node
- */
-template <typename KeyType, typename ValueType, class KeyComparator>
-void BWTree<KeyType, ValueType, KeyComparator>::splitLeafNode(void) {}
 
 template <typename KeyType, typename ValueType, class KeyComparator>
 std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
@@ -989,15 +988,14 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
 template <typename KeyType, typename ValueType, class KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
     BwNode* original_node, std::vector<BwNode*>& garbage_nodes,
-    std::vector<std::pair<KeyType, PID>>& separators, PID& sibling,
-    bool& has_merge, BwNode*& merge_node, KeyType& lower_bound) {
+    std::vector<std::pair<KeyType, PID>>& separators, bool& has_merge,
+    BwNode*& merge_node, KeyType& lower_bound) {
   std::vector<std::pair<KeyType, PID>> insert_separators;
   std::vector<std::pair<KeyType, PID>> delete_separators;
 
   // Split variables
   bool has_split = false;
   KeyType split_separator_key;
-  PID new_sibling;
 
   // Merge variables
   has_merge = false;
@@ -1038,7 +1036,6 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
         BwDeltaSplitNode* split_node = static_cast<BwDeltaSplitNode*>(node);
         has_split = true;
         split_separator_key = split_node->separator_key;
-        new_sibling = split_node->split_sibling;
         break;
       }
       case deltaMerge: {
@@ -1071,10 +1068,8 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
                          inner_node->separators.end(), split_separator_key,
                          [=](const std::pair<KeyType, PID>& l, const KeyType& r)
                              -> bool { return m_key_less(std::get<0>(l), r); });
-    sibling = new_sibling;
   } else {
     base_end = inner_node->separators.end();
-    sibling = inner_node->next;
   }
 
   // Merge with difference
@@ -1106,21 +1101,20 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(PID id) {
   // Keep track of nodes so we can garbage collect later
   std::vector<BwNode*> garbage_nodes;
   std::vector<std::pair<KeyType, PID>> separators;
-  PID sibling;
   bool has_merge = false;
   BwNode* merge_node = nullptr;
   KeyType lower_bound;
-  traverseAndConsolidateInner(original_node, garbage_nodes, separators, sibling,
+  traverseAndConsolidateInner(original_node, garbage_nodes, separators,
                               has_merge, merge_node, lower_bound);
   if (has_merge) {
     BwNode* dummy_node;
     KeyType dummy_bound;
-    traverseAndConsolidateInner(merge_node, garbage_nodes, separators, sibling,
+    traverseAndConsolidateInner(merge_node, garbage_nodes, separators,
                                 has_merge, dummy_node, dummy_bound);
     assert(!has_merge);
   }
 
-  BwInnerNode* consolidated_node = new BwInnerNode(lower_bound, sibling);
+  BwInnerNode* consolidated_node = new BwInnerNode(lower_bound);
   consolidated_node->separators.swap(separators);
 
   bool result = mapping_table[id].compare_exchange_strong(original_node,
@@ -1222,6 +1216,31 @@ BWTree<KeyType, ValueType, KeyComparator>::installDeltaDelete(
   }
 
   return install_success;
+}
+
+/*
+ * splitLeafNode() - Find a pivot and post deltaSplit record both the leaf node
+ */
+template <typename KeyType, typename ValueType, typename KeyComparator>
+bool BWTree<KeyType, ValueType, KeyComparator>::splitLeafNode(PID id) {
+  return false;
+}
+
+template <typename KeyType, typename ValueType, typename KeyComparator>
+bool BWTree<KeyType, ValueType, KeyComparator>::splitInnerNode(PID id) {
+  // Has to handle the root node splitting and adding another level in
+  // the tree
+  return false;
+}
+
+template <typename KeyType, typename ValueType, typename KeyComparator>
+bool BWTree<KeyType, ValueType, KeyComparator>::mergeLeafNode(PID id) {
+  return false;
+}
+
+template <typename KeyType, typename ValueType, typename KeyComparator>
+bool BWTree<KeyType, ValueType, KeyComparator>::mergeInnerNode(PID id) {
+  return false;
 }
 
 }  // End index namespace
