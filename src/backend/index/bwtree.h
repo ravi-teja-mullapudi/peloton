@@ -356,8 +356,6 @@ class BWTree {
 
   PID findLeafPage(const KeyType& key);
 
-  bool installDeltaRemove(PID id);
-
   bool splitInnerNode(PID id);
 
   bool splitLeafNode(PID id);
@@ -380,6 +378,19 @@ class BWTree {
 
   InstallDeltaResult installDeltaDelete(PID leaf_pid, const KeyType& key,
                                         const ValueType& value);
+
+  InstallDeltaResult installIndexTermDeltaInsert(PID pid, const KeyType& key,
+                                                 const ValueType& value);
+
+  InstallDeltaResult installIndexTermDeltaDelete(PID pid, const KeyType& key,
+                                                 const ValueType& value);
+
+  // Functions to install SMO deltas
+  InstallDeltaResult installDeltaRemove(PID node);
+
+  InstallDeltaResult installDeltaMerge(PID node, PID sibling);
+
+  InstallDeltaResult installDeltaSplit(PID node);
 
   /////////////////////////////////////////////////////////////////
   // Data member definition
@@ -620,7 +631,7 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
   BwNode* curr_node = mapping_table[curr_pid].load();
 
   PID parent_pid = this->NONE_PID;
-  // int deltaLeafLen = 0;
+  int deltaLeafLen = 0;
   int deltaIndexLen = 0;
 
   // Trigger consolidation
@@ -631,7 +642,6 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
   // Note: should not trigger a remove on the left most leaf even if the
   // number of tuples is below a threshold
 
-  // Zig-zag traversal
   while (1) {
     assert(curr_node != nullptr);
     if (curr_node->type == PageType::inner) {
@@ -644,6 +654,8 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
 
       if (deltaIndexLen > this->delta_chain_inner_thesh) {
         consolidateInnerNode(curr_pid);
+        // Reset the chain length counter
+        deltaIndexLen = 0;
         // Even if the consolidate fails or completes the search needs to
         // fetch the curr_node from the mapping table
         curr_node = mapping_table[curr_pid].load();
@@ -652,13 +664,16 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
 
       if (inner_node->separators.size() < this->inner_node_size_min) {
         // Install a remove delta on top of the node
-        // curr_node = mapping_table[curr_pid].load();
-        // continue;
+        installDeltaRemove(curr_pid);
+        curr_node = mapping_table[curr_pid].load();
+        continue;
       }
 
       if (inner_node->separators.size() > this->inner_node_size_max) {
-        // Attempt split
-        // continue;
+        // Install a split delta on top of the node
+        installDeltaSplit(curr_pid);
+        curr_node = mapping_table[curr_pid].load();
+        continue;
       }
 
       // TODO Change this to binary search
@@ -670,14 +685,22 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
           continue;
         } else {
           found_sep = true;
+          // Change page
           parent_pid = curr_pid;
+          deltaIndexLen = 0;
+          // deltaLeafLen should be zero when you reach an inner node
+          assert(deltaLeafLen == 0);
           curr_pid = inner_node->separators[i - 1].second;
           break;
         }
       }
 
       if (!found_sep) {
+        // Change page
         parent_pid = curr_pid;
+        deltaIndexLen = 0;
+        // This should be zero when you reach an inner node
+        assert(deltaLeafLen == 0);
         curr_pid = inner_node->separators.back().second;
       }
 
@@ -687,8 +710,23 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
     } else if (curr_node->type == PageType::deltaIndexTermInsert) {
       BwDeltaIndexTermInsertNode* index_insert_delta =
           static_cast<BwDeltaIndexTermInsertNode*>(curr_node);
+      // Increment the index delta chain counter
+      deltaIndexLen++;
+      if (deltaIndexLen > this->delta_chain_inner_thesh) {
+        consolidateInnerNode(curr_pid);
+        // Reset the chain length counter
+        deltaIndexLen = 0;
+        // Even if the consolidate fails or completes the search needs to
+        // fetch the curr_node from the mapping table
+        curr_node = mapping_table[curr_pid].load();
+        continue;
+      }
       if (key_greater(key, index_insert_delta->new_split_separator_key) &&
           key_lessequal(key, index_insert_delta->next_separator_key)) {
+        // Change page
+        parent_pid = curr_pid;
+        deltaIndexLen = 0;
+        // deltaLeafLen should be zero when you reach an inner node
         curr_pid = index_insert_delta->new_split_sibling;
         curr_node = mapping_table[curr_pid].load();
         continue;
@@ -699,8 +737,23 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
     } else if (curr_node->type == PageType::deltaIndexTermDelete) {
       BwDeltaIndexTermDeleteNode* index_delete_delta =
           static_cast<BwDeltaIndexTermDeleteNode*>(curr_node);
+      // Increment the index delta chain counter
+      deltaIndexLen++;
+      if (deltaIndexLen > this->delta_chain_inner_thesh) {
+        consolidateInnerNode(curr_pid);
+        // Reset the chain length counter
+        deltaIndexLen = 0;
+        // Even if the consolidate fails or completes the search needs to
+        // fetch the curr_node from the mapping table
+        curr_node = mapping_table[curr_pid].load();
+        continue;
+      }
       if (key_greater(key, index_delete_delta->merge_node_low_key) &&
           key_lessequal(key, index_delete_delta->remove_node_high_key)) {
+        // Change page
+        parent_pid = curr_pid;
+        deltaIndexLen = 0;
+        // deltaLeafLen should be zero when you reach an inner node
         curr_pid = index_delete_delta->node_to_merge_into;
         curr_node = mapping_table[curr_pid].load();
         continue;
@@ -709,8 +762,15 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
       curr_node = index_delete_delta->child_node;
 
     } else if (curr_node->type == PageType::deltaSplit) {
+      // Our invariant is that there should be no delta chains on top of a
+      // split node
+      assert(deltaLeafLen == 0 && deltaIndexLen == 0);
       BwDeltaSplitNode* split_delta = static_cast<BwDeltaSplitNode*>(curr_node);
+      // Install an IndexTermDeltaInsert
       if (key_greater(key, split_delta->separator_key)) {
+        // Change page
+        parent_pid = curr_pid;
+        // The delta chain lengths should be zero no need to reset them
         curr_pid = split_delta->split_sibling;
         curr_node = mapping_table[curr_pid].load();
         continue;
@@ -1183,28 +1243,71 @@ BWTree<KeyType, ValueType, KeyComparator>::installDeltaDelete(
   return install_success;
 }
 
+template <typename KeyType, typename ValueType, typename KeyComparator>
+typename BWTree<KeyType, ValueType, KeyComparator>::InstallDeltaResult
+BWTree<KeyType, ValueType, KeyComparator>::installIndexTermDeltaInsert(
+    __attribute__((unused)) PID node,
+    __attribute__((unused)) const KeyType& key,
+    __attribute__((unused)) const ValueType& value) {
+  return install_try_again;
+}
+
+template <typename KeyType, typename ValueType, typename KeyComparator>
+typename BWTree<KeyType, ValueType, KeyComparator>::InstallDeltaResult
+BWTree<KeyType, ValueType, KeyComparator>::installIndexTermDeltaDelete(
+    __attribute__((unused)) PID node,
+    __attribute__((unused)) const KeyType& key,
+    __attribute__((unused)) const ValueType& value) {
+  return install_try_again;
+}
+
+template <typename KeyType, typename ValueType, typename KeyComparator>
+typename BWTree<KeyType, ValueType, KeyComparator>::InstallDeltaResult
+BWTree<KeyType, ValueType, KeyComparator>::installDeltaRemove(
+    __attribute__((unused)) PID node) {
+  return install_try_again;
+}
+
+template <typename KeyType, typename ValueType, typename KeyComparator>
+typename BWTree<KeyType, ValueType, KeyComparator>::InstallDeltaResult
+BWTree<KeyType, ValueType, KeyComparator>::installDeltaMerge(
+    __attribute__((unused)) PID node, __attribute__((unused)) PID sibling) {
+  return install_try_again;
+}
+
+template <typename KeyType, typename ValueType, typename KeyComparator>
+typename BWTree<KeyType, ValueType, KeyComparator>::InstallDeltaResult
+BWTree<KeyType, ValueType, KeyComparator>::installDeltaSplit(
+    __attribute__((unused)) PID node) {
+  return install_try_again;
+}
+
 /*
  * splitLeafNode() - Find a pivot and post deltaSplit record both the leaf node
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
-bool BWTree<KeyType, ValueType, KeyComparator>::splitLeafNode(PID id) {
+bool BWTree<KeyType, ValueType, KeyComparator>::splitLeafNode(
+    __attribute__((unused)) PID id) {
   return false;
 }
 
 template <typename KeyType, typename ValueType, typename KeyComparator>
-bool BWTree<KeyType, ValueType, KeyComparator>::splitInnerNode(PID id) {
+bool BWTree<KeyType, ValueType, KeyComparator>::splitInnerNode(
+    __attribute__((unused)) PID id) {
   // Has to handle the root node splitting and adding another level in
   // the tree
   return false;
 }
 
 template <typename KeyType, typename ValueType, typename KeyComparator>
-bool BWTree<KeyType, ValueType, KeyComparator>::mergeLeafNode(PID id) {
+bool BWTree<KeyType, ValueType, KeyComparator>::mergeLeafNode(
+    __attribute__((unused)) PID id) {
   return false;
 }
 
 template <typename KeyType, typename ValueType, typename KeyComparator>
-bool BWTree<KeyType, ValueType, KeyComparator>::mergeInnerNode(PID id) {
+bool BWTree<KeyType, ValueType, KeyComparator>::mergeInnerNode(
+    __attribute__((unused)) PID id) {
   return false;
 }
 
