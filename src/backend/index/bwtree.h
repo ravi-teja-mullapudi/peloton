@@ -1088,10 +1088,11 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
                       delete_separators.begin(), delete_separators.end(),
                       std::inserter(separators, separators.end()), less_fn);
   // Append sorted inserts to end
-  auto middle_it = separators.insert(
-      separators.end(), insert_separators.begin(), insert_separators.end());
+  auto middle_it = separators.end();
+  separators.insert(separators.end(), insert_separators.begin(),
+                    insert_separators.end());
   // Merge the results together
-  std::inplace_merge(separators_start, middle_it, separators.end());
+  std::inplace_merge(separators_start, middle_it, separators.end(), less_fn);
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
