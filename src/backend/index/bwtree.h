@@ -16,10 +16,6 @@
 #include <atomic>
 #include <algorithm>
 #include <cassert>
-#include <cstdint>
-
-#include "backend/storage/tuple.h"
-#include "backend/common/logger.h"
 
 #define BWTREE_DEBUG
 
@@ -127,6 +123,7 @@ class BWTree {
   enum InstallDeltaResult {
     install_success,
     install_try_again,
+    install_node_invalid,
     install_need_consolidate,
   };
 
@@ -185,13 +182,16 @@ class BWTree {
    */
   class BwDeltaSplitNode : public BwDeltaNode {
    public:
-    BwDeltaSplitNode(BwNode* _child_node, KeyType separator, PID split_sibling)
+    BwDeltaSplitNode(BwNode* _child_node, KeyType _separator_key,
+                     PID _split_sibling, KeyType _next_separator_key)
         : BwDeltaNode(PageType::deltaSplit, _child_node),
-          separator_key(separator),
-          split_sibling(split_sibling) {}
+          separator_key(_separator_key),
+          next_separator_key(_next_separator_key),
+          split_sibling(_split_sibling) {}
 
     KeyType separator_key;
     PID split_sibling;
+    KeyType next_separator_key;
   };  // class BwDeltaSplitNode
 
   /*
@@ -220,18 +220,18 @@ class BWTree {
    public:
     BwDeltaIndexTermDeleteNode(BwNode* _child_node, PID node_to_merge_into,
                                PID node_to_remove, KeyType merge_node_low_key,
-                               KeyType remove_node_high_key)
+                               KeyType next_separator_key)
         : BwDeltaNode(PageType::deltaIndexTermDelete, _child_node),
           node_to_merge_into(node_to_merge_into),
           node_to_remove(node_to_remove),
           merge_node_low_key(merge_node_low_key),
-          remove_node_high_key(remove_node_high_key) {}
+          next_separator_key(next_separator_key) {}
 
     PID node_to_merge_into;
     PID node_to_remove;
     KeyType merge_node_low_key;
     KeyType remove_node_low_key;
-    KeyType remove_node_high_key;
+    KeyType next_separator_key;
   };  // class BwDeltaIndexTermDeleteNode
 
   /*
@@ -256,6 +256,7 @@ class BWTree {
           separator_key(separator_key),
           merge_node(merge_node) {}
 
+    PID node_to_remove;
     KeyType separator_key;
     BwNode* merge_node;
   };  // class BwDeltaMergeNode
@@ -296,35 +297,6 @@ class BWTree {
     // and merging
     std::vector<std::pair<KeyType, ValueType>> data;
   };  // class BwLeafNode
-
-  /// //////////////////////////////////////////////////////////////
-  /// ValueType Comparator (template type oblivious)
-  /// //////////////////////////////////////////////////////////////
-
-  /*
-   * class ValueComparator - Compare struct ItemPointer which is always
-   *                         used as ValueType
-   *
-   * If not then compilation error
-   */
-  class ValueComparator {
-    // ItemPointerData -- BlockIdData -- uint16 lo
-    //                 |             |-- uint16 hi
-    //                 |
-    //                 |- OffsetNumber - typedefed as uint16
-   public:
-    /*
-     * operator() - Checks for equality
-     *
-     * Return True if two data pointers are the same. False otherwise
-     * Since we do not enforce any order for data it is sufficient for
-     * us just to compare equality
-     */
-    bool operator()(const ItemPointer &a, const ItemPointer &b) const {
-      return (a.block == b.block) && \
-             (a.offset == b.offset);
-    }
-  };
 
   /// //////////////////////////////////////////////////////////////
   /// Method decarations & definitions
@@ -412,8 +384,8 @@ class BWTree {
   InstallDeltaResult installDeltaDelete(PID leaf_pid, const KeyType& key,
                                         const ValueType& value);
 
-  InstallDeltaResult installIndexTermDeltaInsert(PID pid, const KeyType& key,
-                                                 const ValueType& value);
+  InstallDeltaResult installIndexTermDeltaInsert(
+      PID pid, const BwDeltaSplitNode* split_node);
 
   InstallDeltaResult installIndexTermDeltaDelete(PID pid, const KeyType& key,
                                                  const ValueType& value);
@@ -445,14 +417,6 @@ class BWTree {
 
   PID m_root;
   const KeyComparator& m_key_less;
-
-  // Leftmost leaf page
-  // NOTE: We assume the leftmost lead page will always be there
-  // For split it remains to be the leftmost page
-  // For merge and remove we need to make sure the last remianing page
-  // shall not be removed
-  // Using this pointer we could do sequential search more efficiently
-  PID first_leaf;
 };
 
 }  // End index namespace
@@ -478,16 +442,14 @@ BWTree<KeyType, ValueType, KeyComparator>::BWTree(KeyComparator _m_key_less)
     : current_mapping_table_size(0), next_pid(0), m_key_less(_m_key_less) {
   // Initialize an empty tree
   BwLeafNode* initial_leaf = new BwLeafNode(KeyType(), NONE_PID);
-  PID leaf_pid = installPage(initial_leaf);
 
+  PID leaf_pid = installPage(initial_leaf);
   BwInnerNode* initial_inner = new BwInnerNode(KeyType());
+
   PID inner_pid = installPage(initial_inner);
   initial_inner->separators.push_back({KeyType(), leaf_pid});
 
   m_root = inner_pid;
-  // We always keep a pointer to the first leaf to
-  // accelerate sequential search
-  first_leaf = leaf_pid;
 
   bwt_printf("Init: Initializer returns. Leaf = %lu, inner = %lu\n", leaf_pid,
              inner_pid);
@@ -682,9 +644,6 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
   // Trigger structure modifying operations
   // split, remove, merge
 
-  // Note: should not trigger a remove on the left most leaf even if the
-  // number of tuples is below a threshold
-
   while (1) {
     assert(curr_node != nullptr);
     if (curr_node->type == PageType::inner) {
@@ -792,7 +751,7 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
         continue;
       }
       if (key_greater(key, index_delete_delta->merge_node_low_key) &&
-          key_lessequal(key, index_delete_delta->remove_node_high_key)) {
+          key_lessequal(key, index_delete_delta->next_separator_key)) {
         // Change page
         parent_pid = curr_pid;
         deltaIndexLen = 0;
@@ -809,7 +768,28 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
       // split node
       assert(deltaLeafLen == 0 && deltaIndexLen == 0);
       BwDeltaSplitNode* split_delta = static_cast<BwDeltaSplitNode*>(curr_node);
-      // Install an IndexTermDeltaInsert
+
+      // Install an IndexTermDeltaInsert and retry till it succeds. Thread
+      // cannot proceed until this succeeds
+      // 1) This might install multiple updates which say the same thing. The
+      //    consolidate must be able to handle the duplicates
+      // 2) The parent_pid might not be correct because the parent might have
+      //    merged into some other node. This needs to be detected by the
+      //    installIndexTermDeltaInsert and return the install_node_invalid
+      //    which triggers a search from the root.
+      InstallDeltaResult status = install_try_again;
+      while (status != install_success) {
+        status = installIndexTermDeltaInsert(parent_pid, split_delta);
+        if (status == install_need_consolidate) {
+          consolidateInnerNode(parent_pid);
+        } else if (status == install_node_invalid) {
+          // Restart from the top
+          curr_pid = m_root;
+          curr_node = mapping_table[curr_pid].load();
+          continue;
+        }
+      }
+
       if (key_greater(key, split_delta->separator_key)) {
         // Change page
         parent_pid = curr_pid;
@@ -822,10 +802,40 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
       curr_node = split_delta->child_node;
 
     } else if (curr_node->type == PageType::deltaRemove) {
-      // Have to find the left sibling
+      // Note: should not trigger a remove on the left most leaf even if the
+      // number of tuples is below a threshold
+
+      // TODO: Install an installDeltaMerge on sibling and retry till it
+      // succeds. Thread
+      // cannot proceed until this succeeds
       assert(false);
     } else if (curr_node->type == PageType::deltaMerge) {
+      // Our invariant is that there should be no delta chains on top of a
+      // split node
+      assert(deltaLeafLen == 0 && deltaIndexLen == 0);
       BwDeltaMergeNode* merge_delta = static_cast<BwDeltaMergeNode*>(curr_node);
+
+      // Install an IndexTermDeltaDelete and retry till it succeds. Thread
+      // cannot proceed until this succeeds
+      // 1) This might install multiple updates which say the same thing. The
+      //    consolidate must be able to handle the duplicates
+      // 2) The parent_pid might not be correct because the parent might have
+      //    merged into some other node. This needs to be detected by the
+      //    installIndexTermDeltaDelete and return the install_node_invalid
+      //    which triggers a search from the root.
+      InstallDeltaResult status = install_try_again;
+      while (status != install_success) {
+        // status = installIndexTermDeltaDelete(parent_pid, split_delta);
+        if (status == install_need_consolidate) {
+          consolidateInnerNode(parent_pid);
+        } else if (status == install_node_invalid) {
+          // Restart from the top
+          curr_pid = m_root;
+          curr_node = mapping_table[curr_pid].load();
+          continue;
+        }
+      }
+
       if (key_greater(key, merge_delta->separator_key)) {
         curr_node = merge_delta->merge_node;
       } else {
@@ -1069,7 +1079,6 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
   // Split variables
   bool has_split = false;
   KeyType split_separator_key;
-  split_separator_key = split_separator_key;
 
   // Merge variables
   has_merge = false;
@@ -1291,8 +1300,7 @@ template <typename KeyType, typename ValueType, typename KeyComparator>
 typename BWTree<KeyType, ValueType, KeyComparator>::InstallDeltaResult
 BWTree<KeyType, ValueType, KeyComparator>::installIndexTermDeltaInsert(
     __attribute__((unused)) PID node,
-    __attribute__((unused)) const KeyType& key,
-    __attribute__((unused)) const ValueType& value) {
+    __attribute__((unused)) const BwDeltaSplitNode* split_node) {
   return install_try_again;
 }
 
