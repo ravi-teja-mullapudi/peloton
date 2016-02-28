@@ -347,7 +347,7 @@ class BWTree {
 
   std::vector<ValueType> find(const KeyType& key);
   // Scan all values
-  void getAllValues(std::vector<ValueType> &result);
+  void getAllValues(std::vector<ValueType>& result);
 
  private:
   bool collectPageItem(BWNode* node_p, const KeyType& key,
@@ -650,10 +650,10 @@ BWTree<KeyType, ValueType, KeyComparator>::spinOnSMOByKey(KeyType& key) {
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::getAllValues(
-                                    std::vector<ValueType> &result) {
+    std::vector<ValueType>& result) {
   bwt_printf("Get All Values!");
 
-  BWNode *node_p = nullptr;
+  BWNode* node_p = nullptr;
   PID next_pid = first_leaf;
 
   int counter = 0;
@@ -670,26 +670,24 @@ void BWTree<KeyType, ValueType, KeyComparator>::getAllValues(
     }
 
     /// After this point, node_p points to a linear delta chain
-    std::vector<std::pair<KeyType, ValueType> > output;
+    std::vector<std::pair<KeyType, ValueType>> output;
 
     // This must succeed
     bool ret = collectAllPageItem(node_p, output, &next_pid);
     (void)ret;
     assert(ret == true);
 
-    if(output.size() == 0) {
+    if (output.size() == 0) {
       break;
     }
 
     // Copy the entire array
-    for(auto it = output.begin();
-        it != output.end();
-        it++) {
+    for (auto it = output.begin(); it != output.end(); it++) {
       result.push_back((*it).second);
     }
 
     // Only if we have reached the last PID
-    if(next_pid == NONE_PID) {
+    if (next_pid == NONE_PID) {
       break;
     }
   }
@@ -744,7 +742,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
     } else {
       /// If there is no next page, then we are here because the key
       /// is greater then the largest key in the tree
-      if(next_pid == NONE_PID) {
+      if (next_pid == NONE_PID) {
         found = false;
 
         break;
@@ -883,8 +881,8 @@ bool BWTree<KeyType, ValueType, KeyComparator>::collectAllPageItem(
           ever_deleted = true;
         }
       }
-    } // if
-  } // while
+    }  // if
+  }    // while
 
   // Less than relation function object for sorting
   using LessFnT = LessFn<KeyType, ValueType, KeyComparator>;
@@ -998,7 +996,7 @@ std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
   do {
     retry = false;
     PID leaf_page = findLeafPage(key);
-    assert(leaf_page != this->NONE_PID);
+    assert(leaf_page != NONE_PID);
 
     BWNode* curr_node = mapping_table[leaf_page].load();
     while (curr_node != nullptr) {
@@ -1428,12 +1426,12 @@ template <typename KeyType, typename ValueType, class KeyComparator>
 typename BWTree<KeyType, ValueType, KeyComparator>::PID
 BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
   // Root should always have a valid pid
-  assert(m_root != this->NONE_PID);
+  assert(m_root != NONE_PID);
 
   PID curr_pid = m_root;
   BWNode* curr_node = mapping_table[curr_pid].load();
 
-  PID parent_pid = this->NONE_PID;
+  PID parent_pid = NONE_PID;
   int chain_length = 0;  // Length of delta chain, including current node
 
   // Trigger consolidation
@@ -1456,6 +1454,8 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
 
     // Set by any delta node which wishes to traverse to a child
     bool request_traverse_child = false;
+    // Set when posting to update index fails due to change in parent
+    bool request_restart_top = false;
     PID child_pid{};
 
     switch (curr_node->type) {
@@ -1545,18 +1545,22 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
 
         bwt_printf("leaf_node_size = %lu\n", leaf_node->data.size());
 
+        // Ravi: Once we have a high key on each page this check should
+        // change to using that. That will also allow us not to worry about
+        // the data.size() being zero.
+        // Ideally this check should be if the key is >= low key and
+        // < high key of the page. Looking at the actual data in the page to
+        // determine this is wrong.
         if (leaf_node->data.size() == 0 ||
             key_lessequal(key, leaf_node->data.back().first) ||
-            leaf_node->next == this->NONE_PID) {
+            leaf_node->next == NONE_PID) {
           bwt_printf(
               "key <= first in the leaf, or next leaf == NONE PID, Break!\n");
 
           still_searching = false;
         } else {
-          // Jump to sibling need to post an index update
-          // There might need to consider duplicates separately
-          curr_pid = leaf_node->next;
-          curr_node = mapping_table[curr_pid].load();
+          // Ended up on the wrong page for the key
+          assert(false);
         }
 
         break;
@@ -1586,8 +1590,7 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
             performConsolidation(parent_pid);
           } else if (status == install_node_invalid) {
             // Restart from the top
-            curr_pid = m_root;
-            curr_node = mapping_table[curr_pid].load();
+            request_restart_top = true;
             break;
           }
         }
@@ -1619,7 +1622,7 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
       case PageType::deltaMerge: {
         bwt_printf("Traversing merge node\n");
         // Our invariant is that there should be no delta chains on top of a
-        // split node
+        // merge node
         assert(chain_length == 1);
         BWDeltaMergeNode* merge_delta =
             static_cast<BWDeltaMergeNode*>(curr_node);
@@ -1639,10 +1642,7 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
             performConsolidation(parent_pid);
           } else if (status == install_node_invalid) {
             // Restart from the top
-            parent_pid = NONE_PID;
-            curr_pid = m_root;
-            curr_node = mapping_table[curr_pid].load();
-            chain_length = 0;
+            request_restart_top = true;
             break;
           }
         }
@@ -1665,6 +1665,14 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
       bwt_printf("Request to traverse to child PID %lu\n", child_pid);
       parent_pid = curr_pid;
       curr_pid = child_pid;
+      curr_node = mapping_table[curr_pid].load();
+      chain_length = 0;
+    }
+
+    if (request_restart_top) {
+      bwt_printf("Request to restart from top %lu\n", curr_pid);
+      parent_pid = NONE_PID;
+      curr_pid = m_root;
       curr_node = mapping_table[curr_pid].load();
       chain_length = 0;
     }
