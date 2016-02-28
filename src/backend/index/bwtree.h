@@ -679,6 +679,7 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
   int deltaLeafLen = 0;
   int deltaIndexLen = 0;
 
+  (void)deltaLeafLen;
   // Trigger consolidation
 
   // Trigger structure modifying operations
@@ -978,11 +979,11 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
   std::set<std::pair<KeyType, ValueType>, LessFnT> delete_records(less_fn);
 
   bool has_split = false;
-  KeyType split_separator_key;
+  KeyType split_separator_key = KeyType();
   PID new_sibling;
 
   has_merge = false;
-  KeyType merge_separator_key;
+  KeyType merge_separator_key = KeyType();
   merge_node = nullptr;
 
   BwNode* node = original_node;
@@ -1118,11 +1119,11 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
 
   // Split variables
   bool has_split = false;
-  KeyType split_separator_key;
+  KeyType split_separator_key = KeyType();
 
   // Merge variables
   has_merge = false;
-  KeyType merge_separator_key;
+  KeyType merge_separator_key = KeyType();
   merge_node = nullptr;
 
   // Keep track of nodes so we can garbage collect later
