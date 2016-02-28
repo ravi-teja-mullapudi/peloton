@@ -448,6 +448,7 @@ class BWTree {
 
   PID m_root;
   const KeyComparator& m_key_less;
+  const ValueComparator m_val_equal;
 
   // Leftmost leaf page
   // NOTE: We assume the leftmost lead page will always be there
@@ -478,7 +479,8 @@ namespace index {
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
 BWTree<KeyType, ValueType, KeyComparator>::BWTree(KeyComparator _m_key_less)
-    : current_mapping_table_size(0), next_pid(0), m_key_less(_m_key_less) {
+    : current_mapping_table_size(0), next_pid(0), m_key_less(_m_key_less),
+      m_val_equal(ValueComparator()) {
   // Initialize an empty tree
   BwLeafNode* initial_leaf = new BwLeafNode(KeyType(), NONE_PID);
 
@@ -507,14 +509,13 @@ BWTree<KeyType, ValueType, KeyComparator>::~BWTree() {
 }
 
 /*
- * isSMO() - Returns true if the target is a SMO operation on leaf page
+ * isSMO() - Returns true if the target is a SMO operation
  *
  * We maintain the invariant that if SMO is going to appear in delta chian,
- * then it must be the first on it. Every routine that sees an SMO on leaf delta
+ * then it must be the first on it. Every routine that sees an SMO on delta
  * must then consolidate it in order to append new delta record
  *
- * SMOs that could appear in leaf delta chain: (ziqi: Please correct me if I'm
- *wrong)
+ * SMOs that could appear in any (leaf & inner) delta chain:
  *   - deltaSplit
  *   - deltaRemove
  *   - deltaMerge
@@ -1287,9 +1288,7 @@ BWTree<KeyType, ValueType, KeyComparator>::installDeltaInsert(
 
   BwNode* old_leaf_p = mapping_table[leaf_pid].load();
 
-  if (old_leaf_p->type == PageType::deltaMerge ||
-      old_leaf_p->type == PageType::deltaRemove ||
-      old_leaf_p->type == PageType::deltaSplit) {
+  if (isSMO(old_leaf_p)) {
     return install_need_consolidate;
   }
 
@@ -1317,9 +1316,7 @@ BWTree<KeyType, ValueType, KeyComparator>::installDeltaDelete(
 
   BwNode* old_leaf_p = mapping_table[leaf_pid].load();
 
-  if (old_leaf_p->type == PageType::deltaMerge ||
-      old_leaf_p->type == PageType::deltaRemove ||
-      old_leaf_p->type == PageType::deltaSplit) {
+  if (isSMO(old_leaf_p)) {
     return install_need_consolidate;
   }
 
