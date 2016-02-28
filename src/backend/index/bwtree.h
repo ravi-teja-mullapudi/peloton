@@ -16,6 +16,8 @@
 #include <atomic>
 #include <algorithm>
 #include <cassert>
+#include "backend/storage/tuple.h"
+#include "backend/common/logger.h"
 
 #define BWTREE_DEBUG
 
@@ -297,6 +299,35 @@ class BWTree {
     // and merging
     std::vector<std::pair<KeyType, ValueType>> data;
   };  // class BwLeafNode
+
+  /// //////////////////////////////////////////////////////////////
+  /// ValueType Comparator (template type oblivious)
+  /// //////////////////////////////////////////////////////////////
+
+  /*
+   * class ValueComparator - Compare struct ItemPointer which is always
+   *                         used as ValueType
+   *
+   * If not then compilation error
+   */
+  class ValueComparator {
+    // ItemPointerData -- BlockIdData -- uint16 lo
+    //                 |             |-- uint16 hi
+    //                 |
+    //                 |- OffsetNumber - typedefed as uint16
+   public:
+    /*
+     * operator() - Checks for equality
+     *
+     * Return True if two data pointers are the same. False otherwise
+     * Since we do not enforce any order for data it is sufficient for
+     * us just to compare equality
+     */
+    bool operator()(const ItemPointer &a, const ItemPointer &b) const {
+      return (a.block == b.block) && \
+             (a.offset == b.offset);
+    }
+  };
 
   /// //////////////////////////////////////////////////////////////
   /// Method decarations & definitions
