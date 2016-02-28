@@ -343,9 +343,13 @@ class BWTree {
   ~BWTree();
 
   bool collectPageItem(PID page_id,
-                       const KeyType& key,
+                       KeyType &key,
                        std::vector<std::pair<KeyType, ValueType>> &output,
-                       PID *next_pid);
+                       PID *next_pid,
+                       KeyType *highest_key);
+  bool collectAllPageItem(PID page_id,
+                          std::vector<std::pair<KeyType, ValueType>> &output,
+                          PID *next_pid);
   bool insert(const KeyType& key, const ValueType& value);
   bool exists(const KeyType& key);
   bool erase(const KeyType& key, const ValueType& value);
@@ -633,19 +637,55 @@ bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
   return false;
 }
 
+/*
+ * collectPageItem() - Collect items in a page with a given key
+ *
+ * This method also returns highest key and next page PID in order
+ * to facilitate page scan.
+ *
+ * If SMO is found in delta chain then return false, and no argument
+ * will be modified. If everything goes well return true.
+ */
+template <typename KeyType, typename ValueType, typename KeyComparator>
+bool BWTree<KeyType, ValueType, KeyComparator>::collectPageItem(
+                       PID page_id,
+                       KeyType &key,
+                       std::vector<std::pair<KeyType, ValueType>> &output,
+                       PID *next_pid,
+                       KeyType *highest_key) {
+
+  std::vector<std::pair<KeyType, ValueType>> all_data;
+  bool ret = collectAllPageItem(page_id, all_data, next_pid);
+  if(ret == false) {
+    return false;
+  }
+
+  // Get highest key for deciding whether to search next page
+  *highest_key = all_data.back().first;
+
+  // Filter only those with the same key as specified
+  for(auto it = all_data.begin();
+      it != all_data.end();
+      it++) {
+    if(key_equal(key, (*it).first)) {
+      output.push_back(*it);
+    }
+  }
+
+  return true;
+}
 
 /*
- * collectPageItem() - Collect items on a given logical page (PID) with
- *                     a given key.
+ * collectPageItem() - Collect items on a given logical page (PID) without
+ *                     a given key (i.e. collect all)
  *
  * It returns the PID for next page in chained pages. If we are looking
  * multiple pages this would be helpful.
  *
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
-bool BWTree<KeyType, ValueType, KeyComparator>::collectPageItem(
+bool BWTree<KeyType, ValueType, KeyComparator>::collectAllPageItem(
                                         PID page_id,
-                                        const KeyType& key,
                                         std::vector<std::pair<KeyType, ValueType>> &output,
                                         PID *next_pid) {
   BWNode *node_p = mapping_table[page_id].load();
