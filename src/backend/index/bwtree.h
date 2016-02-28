@@ -342,12 +342,12 @@ class BWTree {
   BWTree(KeyComparator _m_key_less);
   ~BWTree();
 
-  bool collectPageItem(PID page_id,
+  bool collectPageItem(BWNode *node_p,
                        KeyType &key,
                        std::vector<std::pair<KeyType, ValueType>> &output,
                        PID *next_pid,
                        KeyType *highest_key);
-  bool collectAllPageItem(PID page_id,
+  bool collectAllPageItem(BWNode *node_p,
                           std::vector<std::pair<KeyType, ValueType>> &output,
                           PID *next_pid);
   bool insert(const KeyType& key, const ValueType& value);
@@ -426,6 +426,9 @@ class BWTree {
 
   bool mergeLeafNode(PID id);
 
+  BWNode *spinOnSMOByKey(KeyType &key);
+  BWNode *spinOnSMOByPID(PID page_id);
+
   // Atomically install a page into mapping table
   // NOTE: There are times that new pages are not installed into
   // mapping table but instead they directly replace other page
@@ -454,9 +457,9 @@ class BWTree {
 
   InstallDeltaResult installDeltaSplit(PID node);
 
-  /////////////////////////////////////////////////////////////////
-  // Data member definition
-  /////////////////////////////////////////////////////////////////
+  /// //////////////////////////////////////////////////////////////
+  /// Data member definition
+  /// //////////////////////////////////////////////////////////////
 
   // TODO: Add a global garbage vector per epoch using a lock
 
@@ -575,6 +578,73 @@ bool BWTree<KeyType, ValueType, KeyComparator>::isSMO(BWNode* n) {
 }
 
 /*
+ * spinOnSMOByPID() - Keeps checking whether a PID is SMO, and call
+ *                    consolidation if it is
+ *
+ * This is used to make sure a logical page pointer always points to
+ * a sequential structure
+ */
+template <typename KeyType, typename ValueType, typename KeyComparator>
+typename BWTree <KeyType, ValueType, KeyComparator>::BWNode*
+BWTree<KeyType, ValueType, KeyComparator>::spinOnSMOByPID(PID page_id) {
+  int counter = 0;
+  BWNode *node_p = nullptr;
+
+  node_p = mapping_table[page_id];
+  assert(node_p != nullptr);
+
+  while(isSMO(node_p)) {
+    if(counter++ > ITER_MAX) {
+      assert(false);
+    }
+
+    bool ret = consolidateLeafNode(page_id);
+    if(ret == false) {
+      /// Nothing to do?
+    }
+
+    node_p = mapping_table[page_id];
+  }
+
+  // The returned page is guaranteed not to be SMO
+  /// Even if some other operation adds SMO on top of that
+  /// we could only see the physical pointer
+  return node_p;
+}
+
+/*
+ * spinOnSMOByKey() - This method keeps finding page if it sees a SMO on
+ * the top of a leaf delta chain
+ *
+ * Since findLeafPage() will do all of the consolidation work, we just
+ * need to reinvoke routine
+ */
+template <typename KeyType, typename ValueType, typename KeyComparator>
+typename BWTree <KeyType, ValueType, KeyComparator>::BWNode*
+BWTree<KeyType, ValueType, KeyComparator>::spinOnSMOByKey(KeyType &key) {
+  int counter = 0;
+  BWNode *node_p = nullptr;
+  PID page_id;
+
+  do {
+    if(counter++ > ITER_MAX) {
+      assert(false);
+    }
+
+    // Find the first page where the key lies in
+    page_id = findLeafPage(key);
+
+    node_p = mapping_table[page_id].load();
+    assert(node_p != nullptr);
+  } while(isSMO(node_p));
+
+  // The returned page is guaranteed not to be SMO
+  /// Even if some other operation adds SMO on top of that
+  /// we could only see the physical pointer
+  return node_p;
+}
+
+/*
  * exists() - Return true if a key exists in the tree
  *
  * Searches through the chain of delta pages, scanning for both
@@ -586,55 +656,42 @@ bool BWTree<KeyType, ValueType, KeyComparator>::isSMO(BWNode* n) {
 template <typename KeyType, typename ValueType, typename KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
   bwt_printf("key = %d\n", key);
-  // Find the first page where the key lies in
-  PID page_pid = findLeafPage(key);
+  /// We are guaranteed there will not be SMO in the delta chain
+  BWNode *node_p = spinOnSMOByKey(key);
 
-  BWNode* leaf_node_p = mapping_table[page_pid].load();
-  assert(leaf_node_p != nullptr);
-
-  BWDeltaInsertNode* insert_page_p = nullptr;
-  BWDeltaDeleteNode* delete_page_p = nullptr;
-  BWLeafNode* base_page_p = nullptr;
-  std::pair<KeyType, ValueType>* pair_p = nullptr;
-
-  while (1) {
-    if (leaf_node_p->type == deltaInsert) {
-      insert_page_p = static_cast<BWDeltaInsertNode*>(leaf_node_p);
-
-      bwt_printf("See DeltaInsert Page: %d\n", insert_page_p->ins_record.first);
-
-      // If we see an insert node first, then this implies that the
-      // key does exist in the future consolidated version of the page
-      if (key_equal(insert_page_p->ins_record.first, key) == true) {
-        return true;
-      } else {
-        leaf_node_p = (static_cast<BWDeltaNode*>(leaf_node_p))->child_node;
-      }
-    } else if (leaf_node_p->type == deltaDelete) {
-      delete_page_p = static_cast<BWDeltaDeleteNode*>(leaf_node_p);
-
-      // For delete record it implies the node has been removed
-      // Ravi: This is wrong in the presence of duplicates you cannot bail out
-      // on seeing one delete in the key
-      if (key_equal(delete_page_p->del_record.first, key) == true) {
-        return false;
-      } else {
-        leaf_node_p = (static_cast<BWDeltaNode*>(leaf_node_p))->child_node;
-      }
-    } else if (isBasePage(leaf_node_p)) {
-      // The last step is to search the key in the leaf, and we search
-      // for the key in leaf page
-      base_page_p = static_cast<BWLeafNode*>(leaf_node_p);
-      return std::binary_search(base_page_p->data.begin(),
-                                base_page_p->data.end(), key_less);
-    } else {
+  int counter = 0;
+  while(1) {
+    if(counter++ > ITER_MAX) {
       assert(false);
     }
-  }  // while(1)
+    /// After this point, node_p points to a linear delta chain
+    std::vector<std::pair<KeyType, ValueType> > output;
 
-  // Should not reach here
-  assert(false);
-  return false;
+    PID next_pid;
+    KeyType highest_key = KeyType();
+
+    // This must succeed
+    bool ret = collectPageItem(node_p, key, output, &next_pid, &highest_key);
+    assert(ret == true);
+
+    // If current is less than highest key, then we know the key only exists in
+    // current leaf page and its delta chain
+    if(key_less(key, highest_key)) {
+      // In that case the output is all of possible
+      return output.size() != 0;
+    } else if(key_equal(key, highest_key, key)) {
+      // Trivial: highest key is the same as search key
+      return true;
+    } else {
+      node_p = mapping_table[next_pid].load();
+      if(node_p->type == PageType::deltaRemove) {
+        node_p = (static_cast<BWDeltaNode *>(node_p))->child_node;
+      } else {
+        /// highest key is smaller than current key, probably we missed a split
+        node_p = spinOnSMOByPID(next_pid);
+      }
+    } /// if(...)
+  } /// while(1)
 }
 
 /*
@@ -648,14 +705,14 @@ bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::collectPageItem(
-                       PID page_id,
+                       BWNode *node_p,
                        KeyType &key,
-                       std::vector<std::pair<KeyType, ValueType>> &output,
+                       std::vector<std::pair<KeyType, ValueType> > &output,
                        PID *next_pid,
                        KeyType *highest_key) {
 
   std::vector<std::pair<KeyType, ValueType>> all_data;
-  bool ret = collectAllPageItem(page_id, all_data, next_pid);
+  bool ret = collectAllPageItem(node_p, all_data, next_pid);
   if(ret == false) {
     return false;
   }
@@ -685,11 +742,9 @@ bool BWTree<KeyType, ValueType, KeyComparator>::collectPageItem(
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::collectAllPageItem(
-                                        PID page_id,
-                                        std::vector<std::pair<KeyType, ValueType>> &output,
+                                        BWNode *node_p,
+                                        std::vector<std::pair<KeyType, ValueType> > &output,
                                         PID *next_pid) {
-  BWNode *node_p = mapping_table[page_id].load();
-  // If we have seen a SMO then just return false
   /// NOTE: This could be removed since we guarantee the side pointer
   /// always points to the next page no matter what kind of SMO
   /// happens on top of that
@@ -728,7 +783,8 @@ bool BWTree<KeyType, ValueType, KeyComparator>::collectAllPageItem(
   *next_pid = leaf_node_p->next;
 
   // Bulk load
-  std::vector<std::pair<KeyType, ValueType>> linear_data(leaf_node_p->data.begin(), leaf_node_p->data.end());
+  std::vector<std::pair<KeyType, ValueType> > \
+    linear_data(leaf_node_p->data.begin(), leaf_node_p->data.end());
   // boolean vector to decide whether a pair has been deleted or not
   std::vector<bool> deleted_flag(leaf_node_p->data.size(), false);
 
