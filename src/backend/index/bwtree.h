@@ -448,6 +448,14 @@ class BWTree {
 
   PID m_root;
   const KeyComparator& m_key_less;
+
+  // Leftmost leaf page
+  // NOTE: We assume the leftmost lead page will always be there
+  // For split it remains to be the leftmost page
+  // For merge and remove we need to make sure the last remianing page
+  // shall not be removed
+  // Using this pointer we could do sequential search more efficiently
+  PID first_leaf;
 };
 
 }  // End index namespace
@@ -481,6 +489,7 @@ BWTree<KeyType, ValueType, KeyComparator>::BWTree(KeyComparator _m_key_less)
   initial_inner->separators.push_back({KeyType(), leaf_pid});
 
   m_root = inner_pid;
+  first_leaf = leaf_pid;
 
   bwt_printf("Init: Initializer returns. Leaf = %lu, inner = %lu\n", leaf_pid,
              inner_pid);
