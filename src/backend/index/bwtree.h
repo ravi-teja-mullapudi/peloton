@@ -347,7 +347,7 @@ class BWTree {
 
   std::vector<ValueType> find(const KeyType& key);
   // Scan all values
-  void getAllValues(std::vector<KeyType, ValueType> &result);
+  void getAllValues(std::vector<ValueType> &result);
 
  private:
   bool collectPageItem(BWNode* node_p, const KeyType& key,
@@ -650,7 +650,7 @@ BWTree<KeyType, ValueType, KeyComparator>::spinOnSMOByKey(KeyType& key) {
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::getAllValues(
-                                    std::vector<KeyType, ValueType> &result) {
+                                    std::vector<ValueType> &result) {
   bwt_printf("Get All Values!");
 
   BWNode *node_p = nullptr;
@@ -670,10 +670,11 @@ void BWTree<KeyType, ValueType, KeyComparator>::getAllValues(
     }
 
     /// After this point, node_p points to a linear delta chain
-    std::vector<std::pair<KeyType, ValueType>> output;
+    std::vector<std::pair<KeyType, ValueType> > output;
 
     // This must succeed
     bool ret = collectAllPageItem(node_p, output, &next_pid);
+    (void)ret;
     assert(ret == true);
 
     if(output.size() == 0) {
@@ -684,7 +685,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::getAllValues(
     for(auto it = output.begin();
         it != output.end();
         it++) {
-      result.push_back(*it);
+      result.push_back((*it).second);
     }
 
     // Only if we have reached the last PID
