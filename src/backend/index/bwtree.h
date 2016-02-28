@@ -341,20 +341,21 @@ class BWTree {
   BWTree(KeyComparator _m_key_less);
   ~BWTree();
 
+  bool insert(const KeyType& key, const ValueType& value);
+  bool exists(const KeyType& key);
+  bool erase(const KeyType& key, const ValueType& value);
+
+  std::vector<ValueType> find(const KeyType& key);
+  // Scan all values
+  void getAllValues(std::vector<KeyType, ValueType> &result);
+
+ private:
   bool collectPageItem(BWNode* node_p, const KeyType& key,
                        std::vector<std::pair<KeyType, ValueType>>& output,
                        PID* next_pid, KeyType* highest_key);
   bool collectAllPageItem(BWNode* node_p,
                           std::vector<std::pair<KeyType, ValueType>>& output,
                           PID* next_pid);
-
-  bool insert(const KeyType& key, const ValueType& value);
-  bool exists(const KeyType& key);
-  bool erase(const KeyType& key, const ValueType& value);
-
-  std::vector<ValueType> find(const KeyType& key);
-
- private:
   /*
    * isTupleEqual() - Whether two tuples are equal
    *
@@ -645,6 +646,57 @@ BWTree<KeyType, ValueType, KeyComparator>::spinOnSMOByKey(KeyType& key) {
 }
 
 /*
+ * getAllValues() - Get all values in the tree, using key order
+ */
+template <typename KeyType, typename ValueType, typename KeyComparator>
+void BWTree<KeyType, ValueType, KeyComparator>::getAllValues(
+                                    std::vector<KeyType, ValueType> &result) {
+  bwt_printf("Get All Values!");
+
+  BWNode *node_p = nullptr;
+  PID next_pid = first_leaf;
+
+  int counter = 0;
+  while (1) {
+    if (counter++ > ITER_MAX) {
+      assert(false);
+    }
+
+    node_p = mapping_table[next_pid].load();
+    if (node_p->type == PageType::deltaRemove) {
+      node_p = (static_cast<BWDeltaNode*>(node_p))->child_node;
+    } else {
+      node_p = spinOnSMOByPID(next_pid);
+    }
+
+    /// After this point, node_p points to a linear delta chain
+    std::vector<std::pair<KeyType, ValueType>> output;
+
+    // This must succeed
+    bool ret = collectAllPageItem(node_p, output, &next_pid);
+    assert(ret == true);
+
+    if(output.size() == 0) {
+      break;
+    }
+
+    // Copy the entire array
+    for(auto it = output.begin();
+        it != output.end();
+        it++) {
+      result.push_back(*it);
+    }
+
+    // Only if we have reached the last PID
+    if(next_pid == NONE_PID) {
+      break;
+    }
+  }
+
+  return;
+}
+
+/*
  * exists() - Return true if a key exists in the tree
  *
  * Searches through the chain of delta pages, scanning for both
@@ -656,9 +708,11 @@ BWTree<KeyType, ValueType, KeyComparator>::spinOnSMOByKey(KeyType& key) {
 template <typename KeyType, typename ValueType, typename KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
   bwt_printf("key = %d\n", key);
-  /// We are guaranteed there will not be SMO in the delta chain
+
+  /// We are guaranteed there will not be SMO in the delta chain after
   BWNode* node_p = spinOnSMOByKey(key);
 
+  bool found = false;
   int counter = 0;
   while (1) {
     if (counter++ > ITER_MAX) {
@@ -678,12 +732,25 @@ bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
     // current leaf page and its delta chain
     if (key_less(key, highest_key)) {
       // In that case the output is all of possible
-      return output.size() != 0;
+      found = output.size() != 0;
+
+      break;
     } else if (key_equal(key, highest_key, key)) {
       // Trivial: highest key is the same as search key
-      return true;
+      found = true;
+
+      break;
     } else {
+      /// If there is no next page, then we are here because the key
+      /// is greater then the largest key in the tree
+      if(next_pid == NONE_PID) {
+        found = false;
+
+        break;
+      }
+
       node_p = mapping_table[next_pid].load();
+
       if (node_p->type == PageType::deltaRemove) {
         node_p = (static_cast<BWDeltaNode*>(node_p))->child_node;
       } else {
@@ -692,6 +759,8 @@ bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
       }
     }  /// if(...)
   }    /// while(1)
+
+  return found;
 }
 
 /*
@@ -713,6 +782,9 @@ bool BWTree<KeyType, ValueType, KeyComparator>::collectPageItem(
   if (ret == false) {
     return false;
   }
+
+  // There should not be empty page
+  assert(all_data.size() > 0);
 
   // Get highest key for deciding whether to search next page
   *highest_key = all_data.back().first;
@@ -810,8 +882,8 @@ bool BWTree<KeyType, ValueType, KeyComparator>::collectAllPageItem(
           ever_deleted = true;
         }
       }
-    }
-  }
+    } // if
+  } // while
 
   // Less than relation function object for sorting
   using LessFnT = LessFn<KeyType, ValueType, KeyComparator>;
