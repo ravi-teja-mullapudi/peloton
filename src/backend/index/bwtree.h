@@ -104,7 +104,7 @@ class BWTree {
   constexpr static unsigned int INNER_NODE_SIZE_MIN = 8;
   constexpr static unsigned int INNER_NODE_SIZE_MAX = 16;
   // Node sizes for triggering splits and merges on leaf nodes
-  constexpr static unsigned int LEAF_NODE_SIZE_MIN = 8;
+  constexpr static unsigned int LEAF_NODE_SIZE_MIN = 0;
   constexpr static unsigned int LEAF_NODE_SIZE_MAX = 31;
   // Debug constant: The maximum number of iterations we could do
   // It prevents dead loop hopefully
@@ -476,11 +476,7 @@ class BWTree {
                                                  const ValueType& value);
 
   // Functions to install SMO deltas
-  InstallDeltaResult installDeltaRemove(PID node);
-
   InstallDeltaResult installDeltaMerge(PID node, PID sibling);
-
-  InstallDeltaResult installDeltaSplit(PID node);
 
   void deleteDeltaChain(BWNode* node);
 
@@ -692,7 +688,7 @@ BWTree<KeyType, ValueType, KeyComparator>::spinOnSMOByKey(KeyType& key) {
 template <typename KeyType, typename ValueType, typename KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::getAllValues(
     std::vector<ValueType>& result) {
-  bwt_printf("Get All Values!");
+  bwt_printf("Get All Values!\n");
 
   BWNode* node_p = nullptr;
   PID next_pid = first_leaf;
@@ -1291,8 +1287,13 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
   if (LEAF_NODE_SIZE_MAX < data_size) {
     bwt_printf("Data size greater than threshold, splitting...\n");
     // Find separator key by grabbing middle element
-    auto middle_it = data.begin() + data_size / 2;
-    KeyType separator_key = middle_it->first;
+    auto first_middle_it = data.begin() + data_size / 2;
+    KeyType separator_key = first_middle_it->first;
+    // Need to make sure all keys greater or equal to sep_key are in upper leaf
+    auto middle_it = std::lower_bound(
+      data.begin(), data.end(), separator_key,
+      [=](const std::pair<KeyType, ValueType>& l, const KeyType& r)
+          -> bool { return m_key_less(std::get<0>(l), r); });
     // Place first half in one node
     BWLeafNode* lower_leaf_node =
         new BWLeafNode(lower_bound, separator_key, sibling);
@@ -1429,11 +1430,11 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
   if (has_split) {
     upper_bound = split_separator_key;
     // Find end of separators if split
-    base_end =
-        std::lower_bound(inner_node->separators.begin(),
-                         inner_node->separators.end(), split_separator_key,
-                         [=](const std::pair<KeyType, PID>& l, const KeyType& r)
-                             -> bool { return m_key_less(std::get<0>(l), r); });
+    base_end = std::lower_bound(
+        inner_node->separators.begin(), inner_node->separators.end(),
+        split_separator_key,
+        [=](const std::pair<KeyType, PID>& l, const KeyType& r)
+            -> bool { return m_key_less(std::get<0>(l), r); });
   } else {
     upper_bound = inner_node->upper_bound;
     base_end = inner_node->separators.end();
@@ -1854,9 +1855,28 @@ BWTree<KeyType, ValueType, KeyComparator>::installDeltaDelete(
 template <typename KeyType, typename ValueType, typename KeyComparator>
 typename BWTree<KeyType, ValueType, KeyComparator>::InstallDeltaResult
 BWTree<KeyType, ValueType, KeyComparator>::installIndexTermDeltaInsert(
-    __attribute__((unused)) PID node,
-    __attribute__((unused)) const BWDeltaSplitNode* split_node) {
-  return install_try_again;
+    PID node, const BWDeltaSplitNode* split_node) {
+  BWNode* old_inner_p = mapping_table[node].load();
+
+  if (isSMO(old_inner_p)) {
+    return install_need_consolidate;
+  }
+
+  KeyType new_separator_key = split_node->separator_key;
+  PID split_sibling = split_node->split_sibling;
+  KeyType next_separator_key = split_node->next_separator_key;
+  BWNode* new_inner_p =
+    (BWNode*)new BWDeltaIndexTermInsertNode(old_inner_p, new_separator_key,
+                                            split_sibling, next_separator_key);
+
+  bool cas_success =
+      mapping_table[node].compare_exchange_strong(old_inner_p, new_inner_p);
+  if (cas_success == false) {
+    delete new_inner_p;
+    return install_try_again;
+  }
+
+  return install_success;
 }
 
 template <typename KeyType, typename ValueType, typename KeyComparator>
@@ -1870,22 +1890,8 @@ BWTree<KeyType, ValueType, KeyComparator>::installIndexTermDeltaDelete(
 
 template <typename KeyType, typename ValueType, typename KeyComparator>
 typename BWTree<KeyType, ValueType, KeyComparator>::InstallDeltaResult
-BWTree<KeyType, ValueType, KeyComparator>::installDeltaRemove(
-    __attribute__((unused)) PID node) {
-  return install_try_again;
-}
-
-template <typename KeyType, typename ValueType, typename KeyComparator>
-typename BWTree<KeyType, ValueType, KeyComparator>::InstallDeltaResult
 BWTree<KeyType, ValueType, KeyComparator>::installDeltaMerge(
     __attribute__((unused)) PID node, __attribute__((unused)) PID sibling) {
-  return install_try_again;
-}
-
-template <typename KeyType, typename ValueType, typename KeyComparator>
-typename BWTree<KeyType, ValueType, KeyComparator>::InstallDeltaResult
-BWTree<KeyType, ValueType, KeyComparator>::installDeltaSplit(
-    __attribute__((unused)) PID node) {
   return install_try_again;
 }
 
