@@ -1292,11 +1292,6 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(
     // Find separator key by grabbing middle element
     auto middle_it = data.begin() + data_size / 2;
     KeyType separator_key = middle_it->first;
-    // Place first half in one node
-    BWLeafNode* lower_leaf_node =
-        new BWLeafNode(lower_bound, separator_key, sibling);
-    lower_leaf_node->data.insert(lower_leaf_node->data.end(), data.begin(),
-                                 middle_it);
     // Place second half in other node
     BWLeafNode* upper_leaf_node =
         new BWLeafNode(separator_key, upper_bound, sibling);
@@ -1304,6 +1299,11 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(
                                  data.end());
     // Install second node
     PID new_split_pid = installPage(upper_leaf_node);
+    // Place first half in one node
+    BWLeafNode* lower_leaf_node =
+        new BWLeafNode(lower_bound, separator_key, new_split_pid);
+    lower_leaf_node->data.insert(lower_leaf_node->data.end(), data.begin(),
+                                 middle_it);
     // Create split record
     BWDeltaSplitNode* split_node = new BWDeltaSplitNode(
         lower_leaf_node, separator_key, new_split_pid, upper_bound);
