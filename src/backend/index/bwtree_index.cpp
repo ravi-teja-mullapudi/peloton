@@ -92,12 +92,12 @@ bool BWTreeIndex<KeyType, ValueType, KeyComparator,
   KeyType index_key;
   index_key.SetFromKey(key);
   {
-    index_lock.WriteLock();
+    //index_lock.WriteLock();
 
     // Insert the key, val pair
     container.insert(index_key, location);
 
-    index_lock.Unlock();
+    //index_lock.Unlock();
   }
   return true;
 }
@@ -111,12 +111,12 @@ bool BWTreeIndex<KeyType, ValueType, KeyComparator,
   index_key.SetFromKey(key);
 
   {
-    index_lock.WriteLock();
+    //index_lock.WriteLock();
 
     // Erase the key, val pair
     container.erase(index_key, location);
 
-    index_lock.Unlock();
+    //index_lock.Unlock();
   }
 
   return true;
