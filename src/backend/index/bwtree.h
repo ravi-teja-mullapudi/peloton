@@ -81,7 +81,6 @@
 namespace peloton {
 namespace index {
 
-
 template <typename KeyType, typename ValueType, typename KeyComparator>
 struct LessFnT;
 
@@ -285,7 +284,8 @@ class BWTree {
   class BWInnerNode : public BWNode {
    public:
     BWInnerNode(KeyType _lower_bound, KeyType _upper_bound)
-        : BWNode(PageType::inner), lower_bound(_lower_bound),
+        : BWNode(PageType::inner),
+          lower_bound(_lower_bound),
           upper_bound(_upper_bound) {}
 
     const KeyType lower_bound;
@@ -302,8 +302,10 @@ class BWTree {
   class BWLeafNode : public BWNode {
    public:
     BWLeafNode(KeyType _lower_bound, KeyType _upper_bound, PID _next)
-        : BWNode(PageType::leaf), lower_bound(_lower_bound),
-          upper_bound(_upper_bound), next(_next) {}
+        : BWNode(PageType::leaf),
+          lower_bound(_lower_bound),
+          upper_bound(_upper_bound),
+          next(_next) {}
 
     const KeyType lower_bound;
     const KeyType upper_bound;
@@ -415,8 +417,7 @@ class BWTree {
       std::set<std::pair<Key, Value>, Compare>& delete_records,
       typename std::vector<std::pair<Key, Value>>::iterator data_start,
       typename std::vector<std::pair<Key, Value>>::iterator data_end,
-      Compare& less_fn,
-      std::vector<std::pair<Key, Value>>& output_data);
+      Compare& less_fn, std::vector<std::pair<Key, Value>>& output_data);
 
   // Internal functions to be implemented
   void traverseAndConsolidateLeaf(
@@ -1026,10 +1027,8 @@ bool BWTree<KeyType, ValueType, KeyComparator>::erase(const KeyType& key,
 template <typename KeyType, typename ValueType, class KeyComparator>
 std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
     const KeyType& key) {
-
   // Hacky way to get std::set to compare values for item pointers
-  auto val_cmp = [=](const ValueType& val1,
-                     const ValueType& val2) {
+  auto val_cmp = [=](const ValueType& val1, const ValueType& val2) {
     return !m_val_equal(val1, val2);
   };
 
@@ -1103,8 +1102,8 @@ std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
           using LessFnT = LessFn<KeyType, ValueType, KeyComparator>;
           LessFnT less_fn(m_key_less);
           auto bounds =
-            std::equal_range(node->data.begin(), node->data.end(),
-                             std::make_pair(key, ValueType{}), less_fn);
+              std::equal_range(node->data.begin(), node->data.end(),
+                               std::make_pair(key, ValueType{}), less_fn);
           for (auto it = bounds.first; it != bounds.second; ++it) {
             auto del_it = delete_values.find(it->second);
             if (del_it == delete_values.end()) {
@@ -1135,7 +1134,6 @@ std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
   return values;
 }
 
-
 template <typename KeyType, typename ValueType, class KeyComparator>
 template <typename Key, typename Value, typename Compare>
 void BWTree<KeyType, ValueType, KeyComparator>::consolidateModifications(
@@ -1143,8 +1141,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::consolidateModifications(
     std::set<std::pair<Key, Value>, Compare>& delete_records,
     typename std::vector<std::pair<Key, Value>>::iterator data_start,
     typename std::vector<std::pair<Key, Value>>::iterator data_end,
-    Compare& less_fn,
-    std::vector<std::pair<Key, Value>>& output_data) {
+    Compare& less_fn, std::vector<std::pair<Key, Value>>& output_data) {
   // Perform set difference
   size_t begin_size = output_data.size();
   for (auto it = data_start; it != data_end; ++it) {
@@ -1189,8 +1186,8 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
       case deltaInsert: {
         BWDeltaInsertNode* insert_node = static_cast<BWDeltaInsertNode*>(node);
         // First check if we pass the split
-        if (!has_split || key_less(insert_node->ins_record.first,
-                                   split_separator_key)) {
+        if (!has_split ||
+            key_less(insert_node->ins_record.first, split_separator_key)) {
           // If we have a delete for this record, don't add
           auto it = delete_records.find(insert_node->ins_record);
           if (it == delete_records.end()) {
@@ -1249,12 +1246,10 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
     // Change sibling pointer if we did a split
     sibling = new_sibling;
     upper_bound = split_separator_key;
-    data_end =
-      std::lower_bound(leaf_node->data.begin(),
-                       leaf_node->data.end(), split_separator_key,
-                       [=](const std::pair<KeyType, ValueType>& l,
-                           const KeyType& r)
-                            -> bool { return m_key_less(std::get<0>(l), r); });
+    data_end = std::lower_bound(
+        leaf_node->data.begin(), leaf_node->data.end(), split_separator_key,
+        [=](const std::pair<KeyType, ValueType>& l, const KeyType& r)
+            -> bool { return m_key_less(std::get<0>(l), r); });
   } else {
     sibling = leaf_node->next;
     upper_bound = leaf_node->upper_bound;
@@ -1262,7 +1257,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
   }
 
   consolidateModifications<KeyType, ValueType, LessFnT>(
-    insert_records, delete_records, data_start, data_end, less_fn, data);
+      insert_records, delete_records, data_start, data_end, less_fn, data);
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
@@ -1287,7 +1282,6 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
     assert(!has_merge);
   }
 
-
   // Check size and insert split if needed
   BWNode* swap_node = nullptr;
 
@@ -1297,29 +1291,28 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
   if (LEAF_NODE_SIZE_MAX < data_size) {
     bwt_printf("Data size greater than threshold, splitting...\n");
     // Find separator key by grabbing middle element
-    auto middle_it = data.begin() + data_size/2;
+    auto middle_it = data.begin() + data_size / 2;
     KeyType separator_key = middle_it->first;
     // Place first half in one node
-    BWLeafNode* lower_leaf_node = new BWLeafNode(lower_bound, separator_key,
-                                                 sibling);
+    BWLeafNode* lower_leaf_node =
+        new BWLeafNode(lower_bound, separator_key, sibling);
     lower_leaf_node->data.insert(lower_leaf_node->data.end(), data.begin(),
                                  middle_it);
     // Place second half in other node
-    BWLeafNode* upper_leaf_node = new BWLeafNode(separator_key, upper_bound,
-                                                 sibling);
+    BWLeafNode* upper_leaf_node =
+        new BWLeafNode(separator_key, upper_bound, sibling);
     upper_leaf_node->data.insert(upper_leaf_node->data.end(), middle_it,
                                  data.end());
     // Install second node
     PID new_split_pid = installPage(upper_leaf_node);
     // Create split record
-    BWDeltaSplitNode* split_node =
-      new BWDeltaSplitNode(lower_leaf_node, separator_key, new_split_pid,
-                           upper_bound);
+    BWDeltaSplitNode* split_node = new BWDeltaSplitNode(
+        lower_leaf_node, separator_key, new_split_pid, upper_bound);
     swap_node = split_node;
     did_split = true;
   } else {
-    BWLeafNode* consolidated_node = new BWLeafNode(lower_bound, upper_bound,
-                                                   sibling);
+    BWLeafNode* consolidated_node =
+        new BWLeafNode(lower_bound, upper_bound, sibling);
     consolidated_node->data.swap(data);
 
     if (data_size < LEAF_NODE_SIZE_MIN) {
@@ -1332,9 +1325,8 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(PID id) {
     }
   }
 
-
-  bool result = mapping_table[id].compare_exchange_strong(original_node,
-                                                          swap_node);
+  bool result =
+      mapping_table[id].compare_exchange_strong(original_node, swap_node);
   if (result) {
     // Succeeded, request garbage collection of processed nodes
     addGarbageNodes(garbage_nodes);
@@ -1380,8 +1372,8 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
         if (!has_split || key_less(insert_node->new_split_separator_key,
                                    split_separator_key)) {
           std::pair<KeyType, PID> ins_seperator(
-            insert_node->new_split_separator_key,
-            insert_node->new_split_sibling);
+              insert_node->new_split_separator_key,
+              insert_node->new_split_sibling);
           // If we have a delete for this record, don't add
           auto it = delete_separators.find(ins_seperator);
           if (it == delete_separators.end()) {
@@ -1394,7 +1386,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
         BWDeltaIndexTermDeleteNode* delete_node =
             static_cast<BWDeltaIndexTermDeleteNode*>(node);
         delete_separators.insert(
-          {delete_node->remove_node_low_key, delete_node->node_to_remove});
+            {delete_node->remove_node_low_key, delete_node->node_to_remove});
         break;
       }
       case deltaSplit: {
@@ -1448,8 +1440,8 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
   }
 
   consolidateModifications<KeyType, PID, LessFnT>(
-    insert_separators, delete_separators, base_start, base_end, less_fn,
-    separators);
+      insert_separators, delete_separators, base_start, base_end, less_fn,
+      separators);
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
@@ -1548,8 +1540,9 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
     chain_length += 1;
 
     if (DELTA_CHAIN_INNER_THRESHOLD < chain_length) {
-      bwt_printf("Delta chain greater than threshold, performing "
-                 "consolidation...\n");
+      bwt_printf(
+          "Delta chain greater than threshold, performing "
+          "consolidation...\n");
       performConsolidation(curr_pid);
       // Reset to top of chain
       curr_node = mapping_table[curr_pid].load();
@@ -1650,24 +1643,10 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
 
         bwt_printf("leaf_node_size = %lu\n", leaf_node->data.size());
 
-        // Ravi: Once we have a high key on each page this check should
-        // change to using that. That will also allow us not to worry about
-        // the data.size() being zero.
-        // Ideally this check should be if the key is >= low key and
-        // < high key of the page. Looking at the actual data in the page to
-        // determine this is wrong.
-        if ((key_greaterequal(key, leaf_node->lower_bound) &&
-             key_lessequal(key, leaf_node->upper_bound)) ||
-            leaf_node->next == NONE_PID) {
-          bwt_printf(
-              "key <= first in the leaf, or next leaf == NONE PID, Break!\n");
-
-          still_searching = false;
-        } else {
-          // Ended up on the wrong page for the key
-          assert(false);
-        }
-
+        // Check that we have not ended up on the wrong page for the key
+        assert((key_greaterequal(key, leaf_node->lower_bound) &&
+                key_lessequal(key, leaf_node->upper_bound)));
+        still_searching = false;
         break;
       }
       ////////////////////////////////////////////////////////////////////////////
@@ -1692,8 +1671,9 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
         while (status != install_success) {
           status = installIndexTermDeltaInsert(parent_pid, split_delta);
           if (status == install_need_consolidate) {
-            bwt_printf("Split index parent needs consolidation, "
-                       "performing...\n");
+            bwt_printf(
+                "Split index parent needs consolidation, "
+                "performing...\n");
             performConsolidation(parent_pid);
           } else if (status == install_node_invalid) {
             bwt_printf("Split index parent invalid, restarting search...\n");
@@ -1913,76 +1893,77 @@ template <typename KeyType, typename ValueType, typename KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::deleteDeltaChain(BWNode* node) {
   while (node != nullptr) {
     switch (node->type) {
-    case PageType::deltaInsert:
-      bwt_printf("Freeing insert node\n");
-      break;
-    case PageType::deltaDelete:
-      bwt_printf("Freeing delete node\n");
-      break;
-    case PageType::deltaIndexTermInsert:
-      bwt_printf("Freeing index insert node\n");
-      break;
-    case PageType::deltaIndexTermDelete:
-      bwt_printf("Freeing index delete node\n");
-      break;
-    case PageType::deltaSplit:
-      bwt_printf("Freeing split node\n");
-      break;
-    case PageType::deltaRemove:
-      bwt_printf("Freeing remove node\n");
-      break;
-    case PageType::deltaMerge:
-      bwt_printf("Freeing merge node\n");
-      break;
-    case PageType::inner:
-      bwt_printf("Freeing inner node\n");
-      break;
-    case PageType::leaf:
-      bwt_printf("Freeing leaf node\n");
-      break;
-    default:
-      assert(false);
+      case PageType::deltaInsert:
+        bwt_printf("Freeing insert node\n");
+        break;
+      case PageType::deltaDelete:
+        bwt_printf("Freeing delete node\n");
+        break;
+      case PageType::deltaIndexTermInsert:
+        bwt_printf("Freeing index insert node\n");
+        break;
+      case PageType::deltaIndexTermDelete:
+        bwt_printf("Freeing index delete node\n");
+        break;
+      case PageType::deltaSplit:
+        bwt_printf("Freeing split node\n");
+        break;
+      case PageType::deltaRemove:
+        bwt_printf("Freeing remove node\n");
+        break;
+      case PageType::deltaMerge:
+        bwt_printf("Freeing merge node\n");
+        break;
+      case PageType::inner:
+        bwt_printf("Freeing inner node\n");
+        break;
+      case PageType::leaf:
+        bwt_printf("Freeing leaf node\n");
+        break;
+      default:
+        assert(false);
     }
 
     switch (node->type) {
-    case PageType::deltaInsert:
-    case PageType::deltaDelete:
-    case PageType::deltaIndexTermInsert:
-    case PageType::deltaIndexTermDelete:
-    case PageType::deltaSplit: {
-      BWDeltaNode* delta = static_cast<BWDeltaNode*>(node);
-      node = delta->child_node;
-      delete delta;
-      break;
-    }
-    case PageType::deltaRemove: {
-      delete node;
-      node = nullptr;
-      break;
-    }
-    case PageType::deltaMerge: {
-      BWDeltaMergeNode* merge_node = static_cast<BWDeltaMergeNode*>(node);
-      deleteDeltaChain(merge_node->merge_node);
-      node = merge_node->child_node;
-      delete merge_node;
-      break;
-    }
-    case PageType::inner:
-    case PageType::leaf: {
-      delete node;
-      node = nullptr;
-      break;
-    }
-    default:
-      assert(false);
+      case PageType::deltaInsert:
+      case PageType::deltaDelete:
+      case PageType::deltaIndexTermInsert:
+      case PageType::deltaIndexTermDelete:
+      case PageType::deltaSplit: {
+        BWDeltaNode* delta = static_cast<BWDeltaNode*>(node);
+        node = delta->child_node;
+        delete delta;
+        break;
+      }
+      case PageType::deltaRemove: {
+        delete node;
+        node = nullptr;
+        break;
+      }
+      case PageType::deltaMerge: {
+        BWDeltaMergeNode* merge_node = static_cast<BWDeltaMergeNode*>(node);
+        deleteDeltaChain(merge_node->merge_node);
+        node = merge_node->child_node;
+        delete merge_node;
+        break;
+      }
+      case PageType::inner:
+      case PageType::leaf: {
+        delete node;
+        node = nullptr;
+        break;
+      }
+      default:
+        assert(false);
     }
   }
 }
 
 template <typename KeyType, typename ValueType, typename KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::addGarbageNodes(
-  std::vector<BWNode*>& garbage) {
-  while (!garbage_mutex.try_lock());
+    std::vector<BWNode*>& garbage) {
+  while (!garbage_mutex.try_lock())
+    ;
   garbage_nodes.insert(garbage_nodes.end(), garbage.begin(), garbage.end());
   garbage_mutex.unlock();
 }
