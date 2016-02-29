@@ -1071,8 +1071,15 @@ bool BWTree<KeyType, ValueType, KeyComparator>::erase(const KeyType& key,
 template <typename KeyType, typename ValueType, class KeyComparator>
 std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
     const KeyType& key) {
-  std::vector<std::pair<KeyType, ValueType>> insert_values;
-  std::vector<std::pair<KeyType, ValueType>> delete_values;
+
+  // Hacky way to get std::set to compare values for item pointers
+  auto val_cmp = [=](const ValueType& val1,
+                     const ValueType& val2) {
+    return !m_val_equal(val1, val2);
+  };
+
+  std::vector<ValueType> insert_values;
+  std::set<ValueType, decltype(val_cmp)> delete_values(val_cmp);
 
   std::vector<ValueType> values;
   // Find the leaf page the key can possibly map into
@@ -1117,8 +1124,12 @@ std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
         }
         case PageType::deltaInsert: {
           BWDeltaInsertNode* node = static_cast<BWDeltaInsertNode*>(curr_node);
+
           if (key_equal(key, node->ins_record.first)) {
-            insert_values.push_back(node->ins_record);
+            auto it = delete_values.find(node->ins_record.second);
+            if (it == delete_values.end()) {
+              insert_values.push_back(node->ins_record.second);
+            }
           }
           curr_node = node->child_node;
           break;
@@ -1126,50 +1137,41 @@ std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
         case PageType::deltaDelete: {
           BWDeltaDeleteNode* node = static_cast<BWDeltaDeleteNode*>(curr_node);
           if (key_equal(key, node->del_record.first)) {
-            delete_values.push_back(node->del_record);
+            delete_values.insert(node->del_record.second);
           }
           curr_node = node->child_node;
           break;
         }
         case PageType::leaf: {
           BWLeafNode* node = static_cast<BWLeafNode*>(curr_node);
-          std::vector<std::pair<KeyType, ValueType>> matched_values;
-          for (auto kv : node->data) {
-            if (key_equal(key, kv.first)) {
-              matched_values.push_back(kv);
-            }
-          }
-          auto less_fn = [=](const std::pair<KeyType, ValueType>& l,
-                             const std::pair<KeyType, ValueType>& r) -> bool {
-            return m_key_less(std::get<0>(l), std::get<0>(r)) &&
-                   !m_val_equal(std::get<1>(l), std::get<1>(r));
-          };
 
-          std::vector<std::pair<KeyType, ValueType>> merged_values;
-          std::merge(matched_values.begin(), matched_values.end(),
-                     insert_values.begin(), insert_values.end(),
-                     std::inserter(merged_values, merged_values.end()),
-                     less_fn);
-          matched_values.clear();
-          for (auto kv : merged_values) {
-            bool deleted = false;
-            for (auto del_kv : delete_values) {
-              if (key_equal(kv.first, del_kv.first) &&
-                  m_val_equal(kv.second, del_kv.second)) {
-                deleted = true;
-                break;
-              }
-            }
-            if (!deleted) {
-              values.push_back(kv.second);
+          using LessFnT = LessFn<KeyType, ValueType, KeyComparator>;
+          LessFnT less_fn(m_key_less);
+          auto bounds =
+            std::equal_range(node->data.begin(), node->data.end(),
+                             std::make_pair(key, ValueType{}), less_fn);
+          for (auto it = bounds.first; it != bounds.second; ++it) {
+            auto del_it = delete_values.find(it->second);
+            if (del_it == delete_values.end()) {
+              values.push_back(it->second);
             }
           }
+          values.insert(values.end(), insert_values.begin(),
+                        insert_values.end());
           curr_node = nullptr;
           break;
         }
-        default:
+        case PageType::deltaIndexTermInsert:
+        case PageType::deltaIndexTermDelete:
+        case PageType::inner: {
           // Could our PID have been replaced with an index node via a remove
           // and then subsequent split?
+          bwt_printf("Find got index page for PID, retrying...\n");
+          curr_node = nullptr;
+          retry = true;
+          break;
+        }
+        default:
           assert(false);
       }
     }
@@ -1190,10 +1192,12 @@ void BWTree<KeyType, ValueType, KeyComparator>::consolidateModifications(
     std::vector<std::pair<Key, Value>>& output_data) {
   // Perform set difference
   size_t begin_size = output_data.size();
-  std::set_difference(data_start, data_end,
-                      delete_records.begin(), delete_records.end(),
-                      std::inserter(output_data, output_data.end()),
-                      less_fn);
+  for (auto it = data_start; it != data_end; ++it) {
+    auto del_it = delete_records.find(*it);
+    if (del_it == delete_records.end()) {
+      output_data.push_back(*it);
+    }
+  }
   // Add insert elements
   size_t middle_size = output_data.size();
   output_data.insert(output_data.end(), insert_records.begin(),
@@ -1550,7 +1554,7 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
 
     if (DELTA_CHAIN_INNER_THRESHOLD < chain_length) {
       bwt_printf("Delta chain greater than threshold, performing "
-                 "consolidation...");
+                 "consolidation...\n");
       performConsolidation(curr_pid);
       // Reset to top of chain
       curr_node = mapping_table[curr_pid].load();
