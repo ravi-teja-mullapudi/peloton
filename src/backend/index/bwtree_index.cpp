@@ -18,14 +18,66 @@
 namespace peloton {
 namespace index {
 
+
+template <typename KeyType>
+const BoundedKey<KeyType> BoundedKey<KeyType>::NEG_INF_KEY{IS_NEG_INF};
+
+template <typename KeyType>
+const BoundedKey<KeyType> BoundedKey<KeyType>::POS_INF_KEY{IS_POS_INF};
+
+template <typename KeyType>
+BoundedKey<KeyType>::BoundedKey()
+  : key_type(IS_NEG_INF) {}
+
+template <typename KeyType>
+BoundedKey<KeyType>::BoundedKey(char key_type)
+  : key_type(key_type) {}
+
+template <typename KeyType>
+BoundedKey<KeyType>::BoundedKey(KeyType key)
+  : key_type(IS_REGULAR), key(key) {}
+
+template <typename KeyType, class KeyComparator>
+BoundedKeyComparator<KeyType, KeyComparator>::BoundedKeyComparator(
+    KeyComparator m_key_less) : m_key_less(m_key_less) {}
+
+template <typename KeyType, class KeyComparator>
+bool BoundedKeyComparator<KeyType, KeyComparator>::operator()(
+    const BoundedKey<KeyType>& l, const BoundedKey<KeyType>& r) const {
+  const char& REGULAR = IS_REGULAR;
+  const char& NEG_INF = IS_NEG_INF;
+  const char& POS_INF = IS_POS_INF;
+
+  if (l.key_type == REGULAR && r.key_type == REGULAR) {
+    return m_key_less(l.key, r.key);
+  } else if (l.key_type == REGULAR) {
+    if (r.key_type == POS_INF) {
+      return true;
+    } else {
+      // Is neg inf
+      return false;
+    }
+  } else if (l.key_type == NEG_INF) {
+    if (r.key_type == NEG_INF) {
+      return false;
+    } else {
+      // Either regular or inf, either way it is greater
+      return true;
+    }
+  } else {
+    // Can never be less because left is POS_INF
+    return false;
+  }
+}
+
 template <typename KeyType, typename ValueType, class KeyComparator,
           class KeyEqualityChecker>
 BWTreeIndex<KeyType, ValueType, KeyComparator, KeyEqualityChecker>::BWTreeIndex(
     IndexMetadata *metadata)
     : Index(metadata),
-      container(KeyComparator(metadata)),
       equals(metadata),
-      comparator(metadata) {}
+      comparator(metadata),
+      container(BoundedKeyComparator<KeyType, KeyComparator>(comparator)) {}
 
 template <typename KeyType, typename ValueType, class KeyComparator,
           class KeyEqualityChecker>
