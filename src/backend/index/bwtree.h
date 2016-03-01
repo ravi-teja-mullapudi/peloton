@@ -113,7 +113,6 @@ class BWTree {
   // Enumeration of the types of nodes required in updating both the values
   // and the index in the BW Tree. Currently only adding node types for
   // supporting splits.
-  // TODO: more node types to be added for merging
 
   enum PageType {
     leaf,
@@ -443,8 +442,6 @@ class BWTree {
 
   bool isBasePage(BWNode* node_p) { return node_p->type == leaf; }
 
-  BWNode* findBasePage(BWNode* delta_chain);
-
   std::pair<PID, BWNode*> findLeafPage(const KeyType& key);
 
   bool splitInnerNode(PID id);
@@ -737,8 +734,8 @@ void BWTree<KeyType, ValueType, KeyComparator>::getAllValues(
  * Searches through the chain of delta pages, scanning for both
  * delta record and the final leaf record
  *
- * NOTE: Currently this method does not support duplicated key
- * test, since duplicated keys might span multiple pages
+ * NOTE: Currently this method does support duplicated key
+ * test, since we traverse multiple pages
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
@@ -1565,19 +1562,6 @@ bool BWTree<KeyType, ValueType, KeyComparator>::performConsolidation(
   } else {
     return consolidateInnerNode(id, node);
   }
-}
-
-template <typename KeyType, typename ValueType, class KeyComparator>
-typename BWTree<KeyType, ValueType, KeyComparator>::BWNode*
-BWTree<KeyType, ValueType, KeyComparator>::findBasePage(
-    BWNode* delta_chain) {
-  BWNode* current_node = delta_chain;
-  while (current_node->type != PageType::inner ||
-         current_node->type != PageType::leaf) {
-    BWDeltaNode* delta = static_cast<BWDeltaNode*>(current_node);
-    current_node = delta->child_node;
-  }
-  return current_node;
 }
 
 // Returns the first page where the key can reside
