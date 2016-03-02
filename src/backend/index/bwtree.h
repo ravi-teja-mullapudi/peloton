@@ -367,6 +367,14 @@ class BWTree {
   bool collectAllPageItem(BWNode* node_p,
                           std::vector<std::pair<KeyType, ValueType>>& output,
                           PID* next_pid);
+
+  /*
+   * isValueEqual() - Compare two values and see if they are equal
+   */
+  inline bool isValueEqual(const ValueType &a, const ValueType &b) const {
+    return m_val_equal(a, b);
+  }
+
   /*
    * isTupleEqual() - Whether two tuples are equal
    *
