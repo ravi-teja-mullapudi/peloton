@@ -343,6 +343,24 @@ class BWTree {
     }
   };
 
+  /*
+   * class ConsistencyChecker - Checks for tree structural integrity
+   *
+   * NOTE: Only prototypes are defined. We need to come up with more
+   * checks
+   */
+  class ConsistencyChecker
+  {
+    public:
+      ConsistencyChecker() {}
+      void printTreeStructure();
+      bool checkInnerNode(BWNode *node_p);
+      bool checkLeafNode(BWNode *node_p);
+      bool checkSeparator(BWInnerNode *inner_node_p);
+      bool checkInnerNodeBound(BWNode *node_p);
+      bool checkLeafNodeBound(BWNode *node_p);
+  };
+
   /// //////////////////////////////////////////////////////////////
   /// Method decarations & definitions
   /// //////////////////////////////////////////////////////////////
@@ -516,6 +534,8 @@ class BWTree {
   const KeyComparator m_key_less;
   const ValueComparator m_val_equal;
 
+  const ConsistencyChecker checker;
+
   // Leftmost leaf page
   // NOTE: We assume the leftmost lead page will always be there
   // For split it remains to be the leftmost page
@@ -569,7 +589,8 @@ BWTree<KeyType, ValueType, KeyComparator>::BWTree(KeyComparator _m_key_less)
     : current_mapping_table_size(0),
       next_pid(0),
       m_key_less(_m_key_less),
-      m_val_equal(ValueComparator()) {
+      m_val_equal(ValueComparator()),
+      checker(ConsistencyChecker()) {
   // Initialize an empty tree
   KeyType low_key = KeyType::NEG_INF_KEY;
   KeyType high_key = KeyType::POS_INF_KEY;
