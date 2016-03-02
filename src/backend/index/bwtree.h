@@ -459,7 +459,6 @@ class BWTree {
   bool mergeLeafNode(PID id);
 
   BWNode* spinOnSMOByKey(KeyType& key);
-  BWNode* spinOnSMOByPID(PID page_id);
 
   // Atomically install a page into mapping table
   // NOTE: There are times that new pages are not installed into
@@ -626,41 +625,6 @@ bool BWTree<KeyType, ValueType, KeyComparator>::isSMO(BWNode* n) {
 }
 
 /*
- * spinOnSMOByPID() - Keeps checking whether a PID is SMO, and call
- *                    consolidation if it is
- *
- * This is used to make sure a logical page pointer always points to
- * a sequential structure
- */
-template <typename KeyType, typename ValueType, typename KeyComparator>
-typename BWTree<KeyType, ValueType, KeyComparator>::BWNode*
-BWTree<KeyType, ValueType, KeyComparator>::spinOnSMOByPID(PID page_id) {
-  int counter = 0;
-  BWNode* node_p = nullptr;
-
-  node_p = mapping_table[page_id];
-  assert(node_p != nullptr);
-
-  while (isSMO(node_p)) {
-    if (counter++ > ITER_MAX) {
-      assert(false);
-    }
-
-    bool ret = consolidateLeafNode(page_id, node_p);
-    if (ret == false) {
-      /// Nothing to do?
-    }
-
-    node_p = mapping_table[page_id];
-  }
-
-  // The returned page is guaranteed not to be SMO
-  /// Even if some other operation adds SMO on top of that
-  /// we could only see the physical pointer
-  return node_p;
-}
-
-/*
  * spinOnSMOByKey() - This method keeps finding page if it sees a SMO on
  * the top of a leaf delta chain
  *
@@ -805,17 +769,61 @@ bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
   /// We are guaranteed there will not be SMO in the delta chain after
   BWNode* node_p = spinOnSMOByKey(key);
 
+  /// If we have seen split node then this will be set
+  /// and we use two loops to test a splitted node and its sibling
+  PID sibling_pid = NONE_PID;
+
   bool found = false;
+  bool try_sibling = false;
   int counter = 0;
   while (1) {
     if (counter++ > ITER_MAX) {
       assert(false);
     }
+
+    /// If there is no next page, then we are here because the key
+    /// is greater then the largest key in the tree
+    if (next_pid == NONE_PID) {
+      found = false;
+
+      break;
+    }
+
+    // If we have seen a split node in previous loop then just
+    // try its sibling
+    if(try_sibling == false) {
+      node_p = mapping_table[next_pid].load();
+    } else {
+      node_p = mapping_table[sibling_pid];
+      try_sibling = false;
+    }
+
+    assert(node_p != nullptr);
+
+    if (node_p->type == PageType::deltaRemove) {
+      node_p = (static_cast<BWDeltaNode*>(node_p))->child_node;
+    } else if(node_p->type == PageType::deltaMerge) {
+      node_p = (static_cast<BWDeltaNode*>(node_p))->child_node;
+    } else if(node_p->type == PageType::deltaSplit) {
+      BWDeltaSplitNode *split_node_p = static_cast<BWDeltaSplitNode*>(node_p);
+
+      /// We let the procedure try this in next loop
+      /// by saving its PID (rather than physical pointer which is dangerous)
+      try_sibling = true;
+      sibling_pid = split_node_p->split_sibling;
+      assert(sibling_pid != NONE_PID);
+
+      /// Direct it to the left leaf of split node first
+      node_p = split_node_p->child_node;
+    }
+
     /// After this point, node_p points to a linear delta chain
     std::vector<std::pair<KeyType, ValueType>> output;
 
+    /// This will not be used if try_sibling is set
     PID next_pid;
-    KeyType highest_key = KeyType();
+    /// To judge whether we need to scan the next page
+    KeyType highest_key{};
 
     // This must succeed
     bool ret = collectPageItem(node_p, key, output, &next_pid, &highest_key);
@@ -833,23 +841,6 @@ bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
       found = true;
 
       break;
-    } else {
-      /// If there is no next page, then we are here because the key
-      /// is greater then the largest key in the tree
-      if (next_pid == NONE_PID) {
-        found = false;
-
-        break;
-      }
-
-      node_p = mapping_table[next_pid].load();
-
-      if (node_p->type == PageType::deltaRemove) {
-        node_p = (static_cast<BWDeltaNode*>(node_p))->child_node;
-      } else {
-        /// highest key is smaller than current key, probably we missed a split
-        node_p = spinOnSMOByPID(next_pid);
-      }
     }  /// if(...)
   }    /// while(1)
 
