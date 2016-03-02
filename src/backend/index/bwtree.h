@@ -448,8 +448,6 @@ class BWTree {
 
   bool isSMO(BWNode* n);
 
-  bool isBasePage(BWNode* node_p) { return node_p->type == leaf; }
-
   std::pair<PID, BWNode*> findLeafPage(const KeyType& key);
 
   bool splitInnerNode(PID id);
