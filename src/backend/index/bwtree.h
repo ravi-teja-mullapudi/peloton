@@ -686,6 +686,15 @@ BWTree<KeyType, ValueType, KeyComparator>::spinOnSMOByKey(KeyType& key) {
 
 /*
  * getAllValues() - Get all values in the tree, using key order
+ *
+ * This function could not use findLeafPage() since there is no key
+ * relationship to use. It has to conduct its own process of traversing
+ * through SMOs
+ *
+ * We actually do not do anything special regarding SMOs except split
+ * where we could not follow the sibling pointer to get to next sibling page
+ * and in that case it is this function's duty to track two branches
+ * of the split and merge them into one array
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::getAllValues(
@@ -701,35 +710,79 @@ void BWTree<KeyType, ValueType, KeyComparator>::getAllValues(
       assert(false);
     }
 
+    if(next_pid == NONE_PID) {
+      bw_printf("End of leaf chain, return!");
+
+      break;
+    }
+
+    std::vector<std::pair<KeyType, ValueType>> output;
+
     node_p = mapping_table[next_pid].load();
     if (node_p->type == PageType::deltaRemove) {
       node_p = (static_cast<BWDeltaNode*>(node_p))->child_node;
+    } else if(node_p->type == PageType::deltaMerge) {
+      // For deltaMerge node just let it be, the right sibling pointer
+      // would find the correct leaf page
+      node_p = (static_cast<BWDeltaNode*>(node_p))->child_node;
+    } else if(node_p->type == PageType::deltaSplit) {
+      BWDeltaSplitNode *split_node_p = static_cast<BWDeltaSplitNode*>(node_p);
+
+      /// next_pid is not used here since we already know. Also no-SMO under split
+      bool ret1 = collectAllPageItem(split_node_p->child_node, output, &next_pid);
+      (void)ret1;
+      assert(ret1 == true);
+
+      PID split_sibling_pid = split_node_p->split_sibling;
+      BWNode *split_sibling_p = mapping_table[split_sibling_pid];
+
+      std::vector<std::pair<KeyType, ValueType>> output_2;
+      PID next_pid_2;
+      /// There will not be other SMOs under split(), since after split record
+      /// has been posted, every SMO must first see the split() and then fail
+      /// So we could safely assume the delta chain under split is linear and non-SMO
+      /// Even no remove could appear under split()
+      bool ret2 = collectAllPageItem(split_sibling_p, output_2, &next_pid_2);
+      (void)ret2;
+      assert(ret2 == true);
+
+      /// Since in a consistent state these two should points to the same page (right)
+      /// sib of the page before split
+      assert(next_pid == next_pid_2);
+
+      // We do not allow empty page. If this happens then must be error
+      /// NOTE: Is it possible that a page is removed too quickly so that
+      /// it becomes empty before findLeafPage() could detect that?
+      assert(output.size() != 0);
+      assert(output_2.size() != 0);
+
+      // Then conbine them together into one
+      for(auto it = output.begin();
+          it != output.end();
+          it++) {
+        result.push_back((*it).second);
+      }
+
+      for(auto it = output_2.begin();
+          it != output_2.end();
+          it++) {
+        result.push_back((*it).second);
+      }
     } else {
-      node_p = spinOnSMOByPID(next_pid);
-    }
+      /// After this point, node_p points to a linear delta chain
+      bool ret = collectAllPageItem(node_p, output, &next_pid);
+      (void)ret;
+      assert(ret == true);
 
-    /// After this point, node_p points to a linear delta chain
-    std::vector<std::pair<KeyType, ValueType>> output;
+      assert(output.size() != 0);
 
-    // This must succeed
-    bool ret = collectAllPageItem(node_p, output, &next_pid);
-    (void)ret;
-    assert(ret == true);
+      // Copy the entire array
+      for (auto it = output.begin(); it != output.end(); it++) {
+        result.push_back((*it).second);
+      }
 
-    if (output.size() == 0) {
-      break;
-    }
-
-    // Copy the entire array
-    for (auto it = output.begin(); it != output.end(); it++) {
-      result.push_back((*it).second);
-    }
-
-    // Only if we have reached the last PID
-    if (next_pid == NONE_PID) {
-      break;
-    }
-  }
+    } // if nodetype == ...
+  } // while(1)
 
   return;
 }
