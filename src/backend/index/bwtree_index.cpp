@@ -18,7 +18,6 @@
 namespace peloton {
 namespace index {
 
-
 template <typename KeyType>
 const BoundedKey<KeyType> BoundedKey<KeyType>::NEG_INF_KEY{IS_NEG_INF};
 
@@ -27,26 +26,27 @@ const BoundedKey<KeyType> BoundedKey<KeyType>::POS_INF_KEY{IS_POS_INF};
 
 template <typename KeyType>
 BoundedKey<KeyType>::BoundedKey()
-  : key_type(IS_NEG_INF) {}
+    : key_type(IS_NEG_INF) {}
 
 template <typename KeyType>
 BoundedKey<KeyType>::BoundedKey(char key_type)
-  : key_type(key_type) {}
+    : key_type(key_type) {}
 
 template <typename KeyType>
 BoundedKey<KeyType>::BoundedKey(KeyType key)
-  : key_type(IS_REGULAR), key(key) {}
+    : key_type(IS_REGULAR), key(key) {}
 
 template <typename KeyType, class KeyComparator>
 BoundedKeyComparator<KeyType, KeyComparator>::BoundedKeyComparator(
-    KeyComparator m_key_less) : m_key_less(m_key_less) {}
+    KeyComparator m_key_less)
+    : m_key_less(m_key_less) {}
 
 template <typename KeyType, class KeyComparator>
 bool BoundedKeyComparator<KeyType, KeyComparator>::operator()(
-    const BoundedKey<KeyType>& l, const BoundedKey<KeyType>& r) const {
-  const char& REGULAR = IS_REGULAR;
-  const char& NEG_INF = IS_NEG_INF;
-  const char& POS_INF = IS_POS_INF;
+    const BoundedKey<KeyType> &l, const BoundedKey<KeyType> &r) const {
+  const char &REGULAR = IS_REGULAR;
+  const char &NEG_INF = IS_NEG_INF;
+  const char &POS_INF = IS_POS_INF;
 
   if (l.key_type == REGULAR && r.key_type == REGULAR) {
     return m_key_less(l.key, r.key);
@@ -92,12 +92,12 @@ bool BWTreeIndex<KeyType, ValueType, KeyComparator,
   KeyType index_key;
   index_key.SetFromKey(key);
   {
-    //index_lock.WriteLock();
+    // index_lock.WriteLock();
 
     // Insert the key, val pair
     container.insert(index_key, location);
 
-    //index_lock.Unlock();
+    // index_lock.Unlock();
   }
   return true;
 }
@@ -111,12 +111,12 @@ bool BWTreeIndex<KeyType, ValueType, KeyComparator,
   index_key.SetFromKey(key);
 
   {
-    //index_lock.WriteLock();
+    // index_lock.WriteLock();
 
     // Erase the key, val pair
     container.erase(index_key, location);
 
-    //index_lock.Unlock();
+    // index_lock.Unlock();
   }
 
   return true;
