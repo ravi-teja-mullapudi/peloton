@@ -369,14 +369,14 @@ class BWTree {
     uint64_t thread_count;
     std::vector<BWNode*> node_list;
 
-    EpochRecord(EpochRecord &&et) {
+    EpochRecord(EpochRecord&& et) {
       node_list = std::move(et.node_list);
       thread_count = et.thread_count;
 
       return;
     }
 
-    EpochRecord &operator=(EpochRecord &&et) {
+    EpochRecord& operator=(EpochRecord&& et) {
       node_list = std::move(et.node_list);
       thread_count = et.thread_count;
 
@@ -393,7 +393,7 @@ class BWTree {
    * and std::unordered_map
    */
   class EpochManager {
-  private:
+   private:
     using bw_epoch_t = uint64_t;
     // This could be handled with CAS
     std::atomic<bw_epoch_t> current_epoch;
@@ -413,7 +413,7 @@ class BWTree {
     // scanned in an increasing order which facilitates our job
     std::map<bw_epoch_t, EpochRecord> garbage_list;
 
-  public:
+   public:
     EpochManager();
 
     // Called by the thread to announce their existence
@@ -421,7 +421,7 @@ class BWTree {
     void leaveEpoch(bw_epoch_t e);
     void advanceEpoch();
 
-    void addGarbageNode(BWNode *node_p);
+    void addGarbageNode(BWNode* node_p);
 
     void sweepAndClean();
   };
@@ -2255,9 +2255,8 @@ bool BWTree<KeyType, ValueType, KeyComparator>::mergeInnerNode(
  * EpochManager Constructor - Initialize current epoch to 0
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
-BWTree<KeyType, ValueType, KeyComparator>::BWTree::EpochManager::EpochManager() :
-  current_epoch(0),
-  join_counter(0) {
+BWTree<KeyType, ValueType, KeyComparator>::BWTree::EpochManager::EpochManager()
+    : current_epoch(0), join_counter(0) {
   return;
 }
 
@@ -2266,13 +2265,14 @@ BWTree<KeyType, ValueType, KeyComparator>::BWTree::EpochManager::EpochManager() 
  * pending to be collected once all older epoches has cleared
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
-void BWTree<KeyType, ValueType, KeyComparator>::BWTree::EpochManager::advanceEpoch() {
+void BWTree<KeyType, ValueType,
+            KeyComparator>::BWTree::EpochManager::advanceEpoch() {
   bool retry = false;
   do {
     bw_epoch_t old_epoch = current_epoch.load();
     bw_epoch_t new_epoch = old_epoch++;
     retry = current_epoch.compare_exchange_strong(old_epoch, new_epoch);
-  } while(retry == false);
+  } while (retry == false);
 
   return;
 }
@@ -2291,10 +2291,10 @@ BWTree<KeyType, ValueType, KeyComparator>::EpochManager::joinEpoch() {
 
   // This is the first thread that joins this epoch
   // Create a new record
-  if(it == garbage_list.end()) {
+  if (it == garbage_list.end()) {
     garbage_list[e] = EpochRecord{};
   } else {
-  // Otherwise just increase its count
+    // Otherwise just increase its count
     EpochRecord er = std::move(it->second);
     er.thread_count++;
     garbage_list[e] = std::move(er);
@@ -2302,7 +2302,7 @@ BWTree<KeyType, ValueType, KeyComparator>::EpochManager::joinEpoch() {
 
   // This does not need be done atomically
   join_counter++;
-  if(join_counter > EpochManager::join_threshold) {
+  if (join_counter > EpochManager::join_threshold) {
     advanceEpoch();
     join_counter = 0;
   }
@@ -2320,7 +2320,8 @@ BWTree<KeyType, ValueType, KeyComparator>::EpochManager::joinEpoch() {
  * know nobody could be referencing to the nodes
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
-void BWTree<KeyType, ValueType, KeyComparator>::BWTree::EpochManager::leaveEpoch(bw_epoch_t e) {
+void BWTree<KeyType, ValueType,
+            KeyComparator>::BWTree::EpochManager::leaveEpoch(bw_epoch_t e) {
   lock.lock();
 
   auto it = garbage_list.find(e);
@@ -2334,7 +2335,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::BWTree::EpochManager::leaveEpoch
 
   garbage_list[e] = std::move(er);
 
-  if(need_clean == true) {
+  if (need_clean == true) {
     sweepAndClean();
   }
 
@@ -2345,35 +2346,33 @@ void BWTree<KeyType, ValueType, KeyComparator>::BWTree::EpochManager::leaveEpoch
 /*
  * EpochManager::sweepAndClean() - Cleans oldest epochs whose ref count is 0
  *
- * We never free memory for the current epoch (there might be a little bit delay)
+ * We never free memory for the current epoch (there might be a little bit
+ *delay)
  * We stops scanning the list of epoches once an epoch whose
  * ref count != not 0 is seen
  *
  * NOTE: This function must be called under critical section
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
-void BWTree<KeyType, ValueType, KeyComparator>::BWTree::EpochManager::sweepAndClean() {
+void BWTree<KeyType, ValueType,
+            KeyComparator>::BWTree::EpochManager::sweepAndClean() {
   // This could be a little bit late compared the real time epoch
   // but it is OK since we could recycle what we have missed in the next run
   bw_epoch_t e = current_epoch.load();
 
-  for(auto it = garbage_list.begin();
-      it != garbage_list.end();
-      it++) {
+  for (auto it = garbage_list.begin(); it != garbage_list.end(); it++) {
     assert(it->first <= e);
 
-    if(it->first == e) {
+    if (it->first == e) {
       break;
-    } else if(it->second.thread_count > 0) {
+    } else if (it->second.thread_count > 0) {
       // We stop when some epoch still has ongoing threads
       break;
     }
 
     std::vector<BWNode*> node_list = std::move(it->second);
 
-    for(auto it2 = node_list.begin();
-        it2 != node_list.end();
-        it2++) {
+    for (auto it2 = node_list.begin(); it2 != node_list.end(); it2++) {
       // TODO: Maybe need to declare destructor as virtual?
       delete it2;
     }
@@ -2387,16 +2386,20 @@ void BWTree<KeyType, ValueType, KeyComparator>::BWTree::EpochManager::sweepAndCl
 /*
  * EpochManager::addGarbageNode() - Adds a garbage node into the current epoch
  *
- * NOTE: We do not add it to the thread's join epoch since remove actually happens
- * after that, therefore other threads could observe the node after the join thread
+ * NOTE: We do not add it to the thread's join epoch since remove actually
+ *happens
+ * after that, therefore other threads could observe the node after the join
+ *thread
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
-void BWTree<KeyType, ValueType, KeyComparator>::BWTree::EpochManager::addGarbageNode(
-    BWNode *node_p) {
+void BWTree<KeyType, ValueType,
+            KeyComparator>::BWTree::EpochManager::addGarbageNode(BWNode*
+                                                                     node_p) {
   lock.lock();
   // Critical section begins
 
-  // This might be a little bit late but it is OK since when the node is unlinked
+  // This might be a little bit late but it is OK since when the node is
+  // unlinked
   // we are sure that the real e is smaller than or equal to this e
   // So all threads after this e could not see the unlinked node still holds
   bw_epoch_t e = current_epoch.load();
