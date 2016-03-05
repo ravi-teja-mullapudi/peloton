@@ -399,6 +399,15 @@ class BWTree {
     std::atomic<bw_epoch_t> current_epoch;
     std::mutex lock;
 
+    // It is a counter that records how many joins has been called;
+    // If this reaches a threshold then we just start next epoch
+    // synchronously inside some thread's join() procedure
+    uint64_t join_counter;
+
+    // We allow at most 1000 join threads inside one epoch
+    // This could be tuned
+    static const uint64_t join_threshold = 1000;
+
     // This structure must be handled inside critical section
     // Also we rely on the fact that when we scan the map, epochs are
     // scanned in an increasing order which facilitates our job
@@ -2247,10 +2256,15 @@ bool BWTree<KeyType, ValueType, KeyComparator>::mergeInnerNode(
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
 BWTree<KeyType, ValueType, KeyComparator>::BWTree::EpochManager::EpochManager() :
-  current_epoch(0) {
+  current_epoch(0),
+  join_counter(0) {
   return;
 }
 
+/*
+ * advanceEpoch() - Advance to a new epoch. All older epoch garbages are now
+ * pending to be collected once all older epoches has cleared
+ */
 template <typename KeyType, typename ValueType, typename KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::BWTree::EpochManager::advanceEpoch() {
   bool retry = false;
@@ -2284,6 +2298,13 @@ BWTree<KeyType, ValueType, KeyComparator>::EpochManager::joinEpoch() {
     EpochRecord er = std::move(it->second);
     er.thread_count++;
     garbage_list[e] = std::move(er);
+  }
+
+  // This does not need be done atomically
+  join_counter++;
+  if(join_counter > EpochManager::join_threshold) {
+    advanceEpoch();
+    join_counter = 0;
   }
 
   // Critical section end
