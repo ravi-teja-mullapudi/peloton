@@ -87,6 +87,10 @@ TEST(IndexTests, BasicTest) {
 
   key0->SetValue(1, ValueFactory::GetStringValue("a"), pool);
 
+  // DELETE BEFORE INSERT
+  bool res = index->DeleteEntry(key0.get(), item0);
+  EXPECT_EQ(res, false);
+
   // INSERT
   index->InsertEntry(key0.get(), item0);
 
@@ -95,6 +99,20 @@ TEST(IndexTests, BasicTest) {
   EXPECT_EQ(locations[0].block, item0.block);
 
   // DELETE
+  index->DeleteEntry(key0.get(), item0);
+
+  locations = index->ScanKey(key0.get());
+  EXPECT_EQ(locations.size(), 0);
+
+  // INSERT SAME KEY VALUE
+  for (int i = 0; i < 100; i++) {
+      index->InsertEntry(key0.get(), item0);
+  }
+
+  locations = index->ScanKey(key0.get());
+  EXPECT_EQ(locations.size(), 100);
+
+  // DELETE SAME KEY VALUE
   index->DeleteEntry(key0.get(), item0);
 
   locations = index->ScanKey(key0.get());
