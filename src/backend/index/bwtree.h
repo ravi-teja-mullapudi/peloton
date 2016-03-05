@@ -533,14 +533,6 @@ class BWTree {
 
   std::pair<PID, BWNode*> findLeafPage(const KeyType& key);
 
-  bool splitInnerNode(PID id);
-
-  bool splitLeafNode(PID id);
-
-  bool mergeInnerNode(PID id);
-
-  bool mergeLeafNode(PID id);
-
   BWNode* spinOnSMOByKey(KeyType& key);
 
   // Atomically install a page into mapping table
@@ -1696,7 +1688,6 @@ bool BWTree<KeyType, ValueType, KeyComparator>::performConsolidation(
     PID id, BWNode* node) {
   // Figure out if this is a leaf or inner node
   bool is_leaf = isLeaf(node);
-  ;
   if (is_leaf) {
     return consolidateLeafNode(id, node);
   } else {
@@ -2019,9 +2010,6 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
 
 // This function will assign a page ID for a given page, and put that page into
 // the mapping table
-//
-// NOTE: This implementation referred to the BW-Tree implementation on github:
-// >> https://github.com/flode/BWTree/blob/master/bwtree.hpp
 template <typename KeyType, typename ValueType, class KeyComparator>
 typename BWTree<KeyType, ValueType, KeyComparator>::PID
 BWTree<KeyType, ValueType, KeyComparator>::installPage(BWNode* new_node_p) {
@@ -2216,35 +2204,6 @@ void BWTree<KeyType, ValueType, KeyComparator>::addGarbageNodes(
     ;
   garbage_nodes.insert(garbage_nodes.end(), garbage.begin(), garbage.end());
   garbage_mutex.unlock();
-}
-
-/*
- * splitLeafNode() - Find a pivot and post deltaSplit record both the leaf node
- */
-template <typename KeyType, typename ValueType, typename KeyComparator>
-bool BWTree<KeyType, ValueType, KeyComparator>::splitLeafNode(
-    __attribute__((unused)) PID id) {
-  return false;
-}
-
-template <typename KeyType, typename ValueType, typename KeyComparator>
-bool BWTree<KeyType, ValueType, KeyComparator>::splitInnerNode(
-    __attribute__((unused)) PID id) {
-  // Has to handle the root node splitting and adding another level in
-  // the tree
-  return false;
-}
-
-template <typename KeyType, typename ValueType, typename KeyComparator>
-bool BWTree<KeyType, ValueType, KeyComparator>::mergeLeafNode(
-    __attribute__((unused)) PID id) {
-  return false;
-}
-
-template <typename KeyType, typename ValueType, typename KeyComparator>
-bool BWTree<KeyType, ValueType, KeyComparator>::mergeInnerNode(
-    __attribute__((unused)) PID id) {
-  return false;
 }
 
 /////////////////////////////////////////////////////////////////////
