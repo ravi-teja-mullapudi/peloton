@@ -1415,7 +1415,6 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(
   // Check size and insert split if needed
   BWNode* swap_node = nullptr;
 
-  bool did_split = false;
   size_t data_size = data.size();
   bwt_printf("Consolidated data size: %lu\n", data_size);
   if (LEAF_NODE_SIZE_MAX < data_size) {
@@ -1439,7 +1438,6 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(
     BWDeltaSplitNode* split_node = new BWDeltaSplitNode(
         lower_leaf_node, separator_key, new_split_pid, upper_bound);
     swap_node = split_node;
-    did_split = true;
   } else {
     BWLeafNode* consolidated_node =
         new BWLeafNode(lower_bound, upper_bound, sibling);
@@ -1461,9 +1459,6 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(
     // Succeeded, request garbage collection of processed nodes
     addGarbageNodes(garbage_nodes);
   } else {
-    if (did_split) {
-      // Cleanup the split node
-    }
     // Failed, cleanup
     deleteDeltaChain(swap_node);
   }
