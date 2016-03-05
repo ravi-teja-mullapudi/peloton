@@ -86,8 +86,6 @@ namespace index {
 template <typename KeyType, typename ValueType, typename KeyComparator>
 struct LessFnT;
 
-// Look up the stx btree interface for background.
-// peloton/third_party/stx/btree.h
 template <typename KeyType, typename ValueType, typename KeyComparator>
 class BWTree {
  private:
@@ -389,7 +387,7 @@ class BWTree {
   /*
    * EpochManager - Manages epoch and garbage collection
    *
-   * NOTE: We implement this usng std::mutex to handle std::vector
+   * NOTE: We implement this using std::mutex to handle std::vector
    * and std::unordered_map
    */
   class EpochManager {
@@ -432,7 +430,7 @@ class BWTree {
  public:
   // TODO: pass a settings structure as we go along instead of
   // passing in individual parameter values
-  BWTree(KeyComparator _m_key_less);
+  BWTree(KeyComparator _m_key_less, bool _m_unique_keys);
   ~BWTree();
 
   bool insert(const KeyType& key, const ValueType& value);
@@ -587,6 +585,7 @@ class BWTree {
 
   std::atomic<PID> m_root;
   const KeyComparator m_key_less;
+  const bool m_unique_keys;
   const ValueComparator m_val_equal;
 
   // TODO: UNFINISHED!!!
@@ -644,10 +643,12 @@ namespace index {
  * empty lead node (i.e. calling data.back() causes undefined behaviour)
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
-BWTree<KeyType, ValueType, KeyComparator>::BWTree(KeyComparator _m_key_less)
+BWTree<KeyType, ValueType, KeyComparator>::BWTree(KeyComparator _m_key_less,
+                                                  bool _m_unique_keys)
     : current_mapping_table_size(0),
       next_pid(0),
       m_key_less(_m_key_less),
+      m_unique_keys(_m_unique_keys),
       m_val_equal(),
       checker(),
       epoch_mgr() {

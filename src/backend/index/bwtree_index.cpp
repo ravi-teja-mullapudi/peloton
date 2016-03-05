@@ -77,7 +77,8 @@ BWTreeIndex<KeyType, ValueType, KeyComparator, KeyEqualityChecker>::BWTreeIndex(
     : Index(metadata),
       equals(metadata),
       comparator(metadata),
-      container(BoundedKeyComparator<KeyType, KeyComparator>(comparator)) {}
+      container(BoundedKeyComparator<KeyType, KeyComparator>(comparator),
+                metadata->unique_keys) {}
 
 template <typename KeyType, typename ValueType, class KeyComparator,
           class KeyEqualityChecker>
