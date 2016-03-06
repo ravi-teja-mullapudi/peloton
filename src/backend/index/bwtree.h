@@ -22,7 +22,7 @@
 #include "backend/storage/tuple.h"
 #include "backend/common/logger.h"
 
-#define BWTREE_DEBUG
+//#define BWTREE_DEBUG
 
 #ifdef BWTREE_DEBUG
 
@@ -30,6 +30,7 @@
   do {                                                    \
     printf("%-24s(): " fmt, __FUNCTION__, ##__VA_ARGS__); \
   } while (0);
+
 #define bwt_printf_red(fmt, ...)                                              \
   do {                                                                        \
     printf("\033[1;31m%-24s(): " fmt "\033[0m", __FUNCTION__, ##__VA_ARGS__); \
@@ -56,9 +57,11 @@
   } while (0);
 #else
 
-#define bwt_printf(args...) \
-  do {                      \
+#define bwt_printf(fmt, ...)                              \
+  do {                                                    \
+    dummy(fmt, ##__VA_ARGS__); \
   } while (0);
+
 #define bwt_printf_red(fmt, ...) \
   do {                           \
   } while (0);
@@ -82,6 +85,8 @@
 
 namespace peloton {
 namespace index {
+
+static void dummy(const char *, ...) {}
 
 template <typename KeyType, typename ValueType, typename KeyComparator>
 struct LessFnT;
