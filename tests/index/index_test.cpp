@@ -31,7 +31,13 @@ ItemPointer item0(120, 5);
 ItemPointer item1(120, 7);
 ItemPointer item2(123, 19);
 
-index::Index *BuildIndex() {
+/*
+ * BuildIndex() - Set up environment to test index implementation
+ *
+ * Argument unique_keys specifies whether the index should accept
+ * duplicated key or not, which by default is set to false
+ */
+index::Index *BuildIndex(bool unique_keys=false) {
   // Build tuple and key schema
   std::vector<std::vector<std::string>> column_names;
   std::vector<catalog::Column> columns;
@@ -61,8 +67,6 @@ index::Index *BuildIndex() {
   tuple_schema = new catalog::Schema(columns);
 
   // Build index metadata
-  const bool unique_keys = false;
-
   index::IndexMetadata *index_metadata = new index::IndexMetadata(
       "test_index", 125, index_type, INDEX_CONSTRAINT_TYPE_DEFAULT,
       tuple_schema, key_schema, unique_keys);
@@ -72,6 +76,56 @@ index::Index *BuildIndex() {
   EXPECT_TRUE(index != NULL);
 
   return index;
+}
+
+/*
+ * UniqueKeyTest() - Test unique key support for index
+ *
+ * We test insert/remove of unique key under several different
+ * conditions
+ */
+TEST(IndexTests, UniqueKeyTest) {
+  // It sets up an index schema with 4 columns
+  // A B C D and set the indexed column to be jointly A and B
+  // which is an integer and a varchar
+  auto pool = TestingHarness::GetInstance().GetTestingPool();
+
+  // We explicitly require the index to enforce unqiue key
+  std::unique_ptr<index::Index> index(BuildIndex(true));
+  std::unique_ptr<storage::Tuple> key0(new storage::Tuple(key_schema, true));
+  key0->SetValue(0, ValueFactory::GetIntegerValue(100), pool);
+  key0->SetValue(1, ValueFactory::GetStringValue("a"), pool);
+
+  // Boolean return value
+  bool ret;
+  // Vector of item return value
+  std::vector<ItemPointer> item_list;
+
+  // First make sure there is no such key in the index and
+  // then delete returns false (trivial)
+  ret = index->DeleteEntry(key0.get(), item0);
+  EXPECT_EQ(ret, false);
+
+  // Insert single key-value pair
+  ret = index->InsertEntry(key0.get(), item0);
+  EXPECT_EQ(ret, true);
+
+  // Make sure it has been inserted
+  item_list = index->ScanKey(key0.get());
+  EXPECT_EQ(item_list.size(), 1);
+
+  // Do the same insertion again, this time it should
+  // fail with false since we are expecting unique key
+  ret = index->InsertEntry(key0.get(), item0);
+  EXPECT_EQ(ret, false);
+
+  // Make sure it has not been inserted
+  item_list = index->ScanKey(key0.get());
+  EXPECT_EQ(item_list.size(), 0);
+
+  // This should be the last line
+  delete tuple_schema;
+  tuple_schema = nullptr;
 }
 
 TEST(IndexTests, BasicTest) {
@@ -110,6 +164,7 @@ TEST(IndexTests, BasicTest) {
   }
 
   locations = index->ScanKey(key0.get());
+
   EXPECT_EQ(locations.size(), 100);
 
   // DELETE SAME KEY VALUE
