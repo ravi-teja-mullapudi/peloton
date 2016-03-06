@@ -134,6 +134,9 @@ TEST(IndexTests, UniqueKeyTest) {
   /*
    * Many key test for unique key
    */
+
+  // Use another index object to avoid previous result pollute this test
+  std::unique_ptr<index::Index> index2(BuildIndex(true));
   // We test the index with this many different keys
   const int key_list_size = 200;
 
@@ -148,15 +151,47 @@ TEST(IndexTests, UniqueKeyTest) {
 
   // Test whether many key insertion under unique key mode is successful
   for(int i = 0;i < key_list_size;i++) {
-    ret = index->InsertEntry((key_list[i]), item0);
+    ret = index2->InsertEntry(key_list[i], item0);
     EXPECT_EQ(ret, true);
+
+    // Make sure it has been deleted (no search result)
+    item_list = index2->ScanKey(key_list[i]);
+    EXPECT_EQ(item_list.size(), 1);
   }
 
   // Check whether that many keys have been inserted
-  item_list = index->ScanKey(key0.get());
+  item_list = index2->ScanAllKeys();
   EXPECT_EQ(item_list.size(), key_list_size);
 
-  // Avoid memory leak
+  // Delete most of the keys (whose index is a multiple of 2 or 3 or 5)
+  int counter = 0;
+  for(int i = 0;i < key_list_size;i++) {
+    if(((i % 2) == 0) || \
+       ((i % 3) == 0) || \
+       ((i % 5) == 0)) {
+      // Make sure delete succeeds
+      ret = index2->DeleteEntry(key_list[i], item0);
+      EXPECT_EQ(ret, true);
+
+      // We use this to validate ScanKey() result
+      counter++;
+
+      // Make sure it has been deleted (no search result)
+      item_list = index2->ScanKey(key_list[i]);
+      EXPECT_EQ(item_list.size(), 0);
+
+      // Try to delete a key that does not exist in the
+      // index - should always return false
+      ret = index2->DeleteEntry(key0.get(), item0);
+      EXPECT_EQ(ret, false);
+    }
+  }
+
+  // There should be remaining (key_list_size - counter) keys
+  item_list = index2->ScanAllKeys();
+  EXPECT_EQ(item_list.size(), key_list_size - counter);
+
+  // Clean up - Avoid memory leak
   for(int i = 0;i < key_list_size;i++) {
     delete key_list[i];
   }
