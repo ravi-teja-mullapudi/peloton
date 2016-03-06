@@ -82,10 +82,17 @@ TEST(IndexTests, BasicTest) {
   std::unique_ptr<index::Index> index(BuildIndex());
 
   std::unique_ptr<storage::Tuple> key0(new storage::Tuple(key_schema, true));
+  std::unique_ptr<storage::Tuple> key1(new storage::Tuple(key_schema, true));
+  std::unique_ptr<storage::Tuple> key2(new storage::Tuple(key_schema, true));
 
   key0->SetValue(0, ValueFactory::GetIntegerValue(100), pool);
-
   key0->SetValue(1, ValueFactory::GetStringValue("a"), pool);
+
+  key1->SetValue(0, ValueFactory::GetIntegerValue(101), pool);
+  key1->SetValue(1, ValueFactory::GetStringValue("b"), pool);
+
+  key2->SetValue(0, ValueFactory::GetIntegerValue(102), pool);
+  key2->SetValue(1, ValueFactory::GetStringValue("c"), pool);
 
   // DELETE BEFORE INSERT
   bool res = index->DeleteEntry(key0.get(), item0);
@@ -93,6 +100,8 @@ TEST(IndexTests, BasicTest) {
 
   // INSERT
   index->InsertEntry(key0.get(), item0);
+  index->InsertEntry(key1.get(), item1);
+  index->InsertEntry(key2.get(), item2);
 
   locations = index->ScanKey(key0.get());
   EXPECT_EQ(locations.size(), 1);
