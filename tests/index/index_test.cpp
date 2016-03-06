@@ -160,6 +160,7 @@ TEST(IndexTests, UniqueKeyTest) {
   }
 
   // Check whether that many keys have been inserted
+  // NOTE: CURRENT WE FAIL THE FOLLOWING STATEMENT
   item_list = index2->ScanAllKeys();
   EXPECT_EQ(item_list.size(), key_list_size);
 
