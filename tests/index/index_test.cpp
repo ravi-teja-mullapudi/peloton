@@ -101,6 +101,10 @@ TEST(IndexTests, UniqueKeyTest) {
   // Vector of item return value
   std::vector<ItemPointer> item_list;
 
+  /*
+   * Single key test for unique key
+   */
+
   // First make sure there is no such key in the index and
   // then delete returns false (trivial)
   ret = index->DeleteEntry(key0.get(), item0);
@@ -122,6 +126,50 @@ TEST(IndexTests, UniqueKeyTest) {
   // Make sure it has not been inserted
   item_list = index->ScanKey(key0.get());
   EXPECT_EQ(item_list.size(), 0);
+
+  /*
+   * End of previous test
+   */
+
+  /*
+   * Many key test for unique key
+   */
+  // We test the index with this many different keys
+  const int key_list_size = 200;
+
+  storage::Tuple **key_list = new storage::Tuple *[key_list_size];
+  for(int i = 0;i < key_list_size;i++) {
+    key_list[i] = new storage::Tuple(key_schema, true);
+
+    // All the key has a unique value
+    key_list[i]->SetValue(0, ValueFactory::GetIntegerValue(i), pool);
+    key_list[i]->SetValue(1, ValueFactory::GetStringValue("many-key-test!"), pool);
+  }
+
+  // Test whether many key insertion under unique key mode is successful
+  for(int i = 0;i < key_list_size;i++) {
+    ret = index->InsertEntry((key_list[i]), item0);
+    EXPECT_EQ(ret, true);
+  }
+
+  // Check whether that many keys have been inserted
+  item_list = index->ScanKey(key0.get());
+  EXPECT_EQ(item_list.size(), key_list_size);
+
+  // Avoid memory leak
+  for(int i = 0;i < key_list_size;i++) {
+    delete key_list[i];
+  }
+
+  delete[] key_list;
+
+  /*
+   * End of previous test
+   */
+
+  /*
+   * End of all tests
+   */
 
   // This should be the last line
   delete tuple_schema;
