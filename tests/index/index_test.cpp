@@ -37,7 +37,7 @@ ItemPointer item2(123, 19);
  * Argument unique_keys specifies whether the index should accept
  * duplicated key or not, which by default is set to false
  */
-index::Index *BuildIndex(bool unique_keys=false) {
+index::Index *BuildIndex(bool unique_keys = false) {
   // Build tuple and key schema
   std::vector<std::vector<std::string>> column_names;
   std::vector<catalog::Column> columns;
@@ -141,16 +141,17 @@ TEST(IndexTests, UniqueKeyTest) {
   const int key_list_size = 200;
 
   storage::Tuple **key_list = new storage::Tuple *[key_list_size];
-  for(int i = 0;i < key_list_size;i++) {
+  for (int i = 0; i < key_list_size; i++) {
     key_list[i] = new storage::Tuple(key_schema, true);
 
     // All the key has a unique value
     key_list[i]->SetValue(0, ValueFactory::GetIntegerValue(i), pool);
-    key_list[i]->SetValue(1, ValueFactory::GetStringValue("many-key-test!"), pool);
+    key_list[i]->SetValue(1, ValueFactory::GetStringValue("many-key-test!"),
+                          pool);
   }
 
   // Test whether many key insertion under unique key mode is successful
-  for(int i = 0;i < key_list_size;i++) {
+  for (int i = 0; i < key_list_size; i++) {
     ret = index2->InsertEntry(key_list[i], item0);
     EXPECT_EQ(ret, true);
 
@@ -166,10 +167,8 @@ TEST(IndexTests, UniqueKeyTest) {
 
   // Delete most of the keys (whose index is a multiple of 2 or 3 or 5)
   int counter = 0;
-  for(int i = 0;i < key_list_size;i++) {
-    if(((i % 2) == 0) || \
-       ((i % 3) == 0) || \
-       ((i % 5) == 0)) {
+  for (int i = 0; i < key_list_size; i++) {
+    if (((i % 2) == 0) || ((i % 3) == 0) || ((i % 5) == 0)) {
       // Make sure delete succeeds
       ret = index2->DeleteEntry(key_list[i], item0);
       EXPECT_EQ(ret, true);
@@ -193,7 +192,7 @@ TEST(IndexTests, UniqueKeyTest) {
   EXPECT_EQ(item_list.size(), key_list_size - counter);
 
   // Clean up - Avoid memory leak
-  for(int i = 0;i < key_list_size;i++) {
+  for (int i = 0; i < key_list_size; i++) {
     delete key_list[i];
   }
 
@@ -253,7 +252,7 @@ TEST(IndexTests, BasicTest) {
 
   // INSERT SAME KEY VALUE
   for (int i = 0; i < 100; i++) {
-      index->InsertEntry(key0.get(), item0);
+    index->InsertEntry(key0.get(), item0);
   }
 
   locations = index->ScanKey(key0.get());
