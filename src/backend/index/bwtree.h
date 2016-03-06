@@ -19,10 +19,12 @@
 #include <stack>
 #include <unordered_map>
 #include <mutex>
+#include <string>
+#include <iostream>
 #include "backend/storage/tuple.h"
 #include "backend/common/logger.h"
 
-#define BWTREE_DEBUG
+//#define BWTREE_DEBUG
 
 #ifdef BWTREE_DEBUG
 
@@ -30,6 +32,7 @@
   do {                                                    \
     printf("%-24s(): " fmt, __FUNCTION__, ##__VA_ARGS__); \
   } while (0);
+
 #define bwt_printf_red(fmt, ...)                                              \
   do {                                                                        \
     printf("\033[1;31m%-24s(): " fmt "\033[0m", __FUNCTION__, ##__VA_ARGS__); \
@@ -56,9 +59,11 @@
   } while (0);
 #else
 
-#define bwt_printf(args...) \
-  do {                      \
+#define bwt_printf(fmt, ...)                              \
+  do {                                                    \
+    dummy(fmt, ##__VA_ARGS__); \
   } while (0);
+
 #define bwt_printf_red(fmt, ...) \
   do {                           \
   } while (0);
@@ -83,6 +88,8 @@
 namespace peloton {
 namespace index {
 
+static void dummy(const char *, ...) {}
+
 template <typename KeyType, typename ValueType, typename KeyComparator>
 struct LessFnT;
 /*
@@ -105,6 +112,8 @@ struct LessFn {
 
 template <typename KeyType, typename ValueType, typename KeyComparator>
 class BWTree {
+  class InteractiveDebugger;
+  friend InteractiveDebugger;
  private:
   using PID = uint64_t;
 
@@ -441,6 +450,154 @@ class BWTree {
     void sweepAndClean();
   };
 
+  /*
+   * InteractiveDebugger - Allows us to explore the tree interactively
+   */
+  class InteractiveDebugger {
+    public:
+      BWTree *tree;
+
+      PID current_pid;
+      BWNode *current_node_p;
+      PageType current_type;
+
+      std::stack<BWNode *> node_stack;
+
+      void printPrompt() {
+          std::cout << "[PID=" << current_pid << "]>>";
+          return;
+      }
+
+      void prepareNode(BWNode *node_p) {
+        // Node pointer must be valid
+        assert(node_p != nullptr);
+        current_node_p = node_p;
+        current_type = node_p->type;
+
+        return;
+      }
+
+      /*
+       * prepareNodeByPID() - Returns false if the PID is invalid
+       */
+      bool prepareNodeByPID(PID pid) {
+        if(pid == NONE_PID) {
+          return false;
+        }
+
+        current_pid = pid;
+        prepareNode(tree->mapping_table[pid].load());
+
+        return true;
+      }
+
+      std::string pageTypeToString(PageType type) {
+        switch(type) {
+          case leaf: return "Leaf";
+          case inner: return "Inner";
+          case deltaInsert: return "Delta Insert";
+          case deltaDelete: return "Delta Delete";
+          case deltaSplit: return "Delta Split";
+          case deltaIndexTermInsert: return "Index Insert";
+          case deltaIndexTermDelete: return "Index Delete";
+          case deltaRemove: return "Remove";
+          case deltaMerge: return "Merge";
+          default: return "Unknown Type (Error!)";
+        }
+
+        assert(false);
+        return "";
+      }
+
+      void processPrint() {
+        std::string s;
+        std::cin >> s;
+
+        if(s == "") {
+          std::cout << "Nothing to print!" << std::endl;
+          return;
+        } else if(s == "node-pointer") {
+          std::cout << current_node_p << std::endl;
+        } else if(s == "type") {
+          std::cout << current_type << " (" \
+                    << pageTypeToString(current_type) \
+                    << ")" << std::endl;
+        } else {
+          std::cout << "Unkown print argument: " << s << std::endl;
+        }
+
+        return;
+      }
+
+      void processGotoChild() {
+        BWDeltaNode *delta_node_p = nullptr;
+
+        switch(current_node_p->type) {
+          case deltaDelete:
+          case deltaIndexTermDelete:
+          case deltaIndexTermInsert:
+          case deltaInsert:
+          case deltaMerge:
+          case deltaRemove:
+          case deltaSplit:
+            delta_node_p = (static_cast<BWDeltaNode*>(current_node_p));
+            // Push current node into the stack to facilitate back tracking
+            node_stack.push(current_node_p);
+            // Make this current node
+            prepareNode(static_cast<BWNode *>(delta_node_p->child_node));
+            break;
+          case leaf:
+          case inner:
+            std::cout << "Type (" << pageTypeToString(current_type) \
+                      << ") does not have child node" << std::endl;
+          break;
+        }
+
+        return;
+      }
+
+      void start() {
+        // We could not start with empty root node
+        assert(prepareNodeByPID(tree->m_root.load()) == true);
+
+        std::cout << "********* Interactive Debugger *********\n";
+
+        while(1) {
+          printPrompt();
+
+          std::string opcode;
+          std::cin >> opcode;
+
+          // If read EOF then resume BWTree execution
+          if(!std::cin) {
+            return;
+          }
+
+          if(opcode == "exit") {
+            exit(0);
+          } else if(opcode == "print") {
+            processPrint();
+          } else if(opcode == "type") {
+            std::cout << current_type << " (" \
+                    << pageTypeToString(current_type) \
+                    << ")" << std::endl;
+          } else if(opcode == "goto-child") {
+            processGotoChild();
+          } else {
+            std::cout << "Unknown command: " << opcode << std::endl;
+          }
+        }
+
+        return;
+      }
+
+      InteractiveDebugger(BWTree *_tree) :
+        tree(_tree),
+        current_pid(0),
+        current_node_p(nullptr) {}
+
+  };
+
   /// //////////////////////////////////////////////////////////////
   /// Method decarations & definitions
   /// //////////////////////////////////////////////////////////////
@@ -620,6 +777,7 @@ class BWTree {
 
   // TODO: Add a global garbage vector per epoch using a lock
   EpochManager epoch_mgr;
+  InteractiveDebugger idb;
 
   // Leftmost leaf page
   // NOTE: We assume the leftmost lead page will always be there
@@ -660,7 +818,8 @@ BWTree<KeyType, ValueType, KeyComparator>::BWTree(KeyComparator _m_key_less,
       m_unique_keys(_m_unique_keys),
       m_val_equal(),
       checker(),
-      epoch_mgr() {
+      epoch_mgr(),
+      idb(this) {
   // Initialize an empty tree
   KeyType low_key = KeyType::NEG_INF_KEY;
   KeyType high_key = KeyType::POS_INF_KEY;
@@ -803,6 +962,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::getAllValues(
       /// Even no remove could appear under split()
       bool ret2 = collectAllPageContents(split_sibling_p, output_2, &next_pid);
       (void)ret2;
+      //if(ret2 == false) idb.start();
       assert(ret2 == true);
 
       bwt_printf("nextpid = %lu, next_pid_2 = %lu\n", next_pid, next_pid_2);
