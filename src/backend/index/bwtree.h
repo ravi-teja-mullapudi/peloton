@@ -459,10 +459,86 @@ class BWTree {
     BWTree* tree;
 
     PID current_pid;
+    // This always points to the current top node of
+    // delta chain which is exactly the node pointer
+    // for current_pid
+    BWNode* current_pid_node_p;
+
     BWNode* current_node_p;
     PageType current_type;
 
+    KeyComparator *m_key_less_p;
+
+    struct IDBKeyCmp {
+      static KeyComparator *m_key_less_p;
+
+      bool operator()(KeyType &a, KeyType &b) const {
+        return (*IDBKeyCmp::m_key_less_p)(a, b);
+      }
+    };
+
+    struct IDBValueCmp {
+      bool operator()(ValueType &a, ValueType &b) {
+        if(a.block < b.block) {
+          return true;
+        }
+
+        if(a.block > b.block) {
+          return false;
+        }
+
+        // a.block == b.block if we get here...
+        if(a.offset < b.offset) {
+          return true;
+        }
+
+        if(a.offset >= b.offset) {
+          return false;
+        }
+
+        assert(false);
+        return false;
+      }
+    };
+
+    uint64_t next_key_id;
+    uint64_t next_value_id;
+    std::map<KeyType, uint64_t, IDBKeyCmp> key_map;
+    std::map<ValueType, uint64_t, IDBValueCmp> value_map;
+
     std::stack<BWNode*> node_stack;
+    std::stack<BWNode*> pid_node_stack;
+    std::stack<PID> pid_stack;
+
+    /*
+     * getKeyID() - Return a unique ID for each unique key
+     */
+    uint64_t getKeyID(KeyType &key) {
+      auto it = key_map.find(key);
+      if(it == key_map.end()) {
+        uint64_t id = next_key_id++;
+        key_map[key] = id;
+
+        return id;
+      }
+
+      return key_map[key];
+    }
+
+    /*
+     * getValueID() - Get a unique ID for each unique value
+     */
+    uint64_t getValueID(ValueType &value) {
+      auto it = value_map.find(value);
+      if(it == value_map.end()) {
+        uint64_t id = next_value_id++;
+        value_map[value] = id;
+
+        return id;
+      }
+
+      return value_map[value];
+    }
 
     void printPrompt() {
       std::cout << "[PID=" << current_pid << "]>>";
@@ -472,6 +548,9 @@ class BWTree {
     void prepareNode(BWNode* node_p) {
       // Node pointer must be valid
       assert(node_p != nullptr);
+
+      node_stack.push(current_node_p);
+
       current_node_p = node_p;
       current_type = node_p->type;
 
@@ -486,8 +565,21 @@ class BWTree {
         return false;
       }
 
+      // Save the root of delta chian and the corresponding PID
+      // There is some sort of interrelationship between these two
+      // We always need to check for consistency
+      pid_stack.push(current_pid);
+      pid_node_stack.push(current_node_p);
+
+      // Also need to check for each element's identity somewhere else
+      assert(pid_stack.size() == pid_node_stack.size());
+
       current_pid = pid;
+      // It calls push for node_stack
       prepareNode(tree->mapping_table[pid].load());
+
+      // We only change this node when PID changes
+      current_pid_node_p = current_node_p;
 
       return true;
     }
@@ -539,6 +631,11 @@ class BWTree {
       return;
     }
 
+    /*
+     * processGotoChild() - Go to the child node of a delta node
+     *
+     * This does not work for inner and leaf nodes
+     */
     void processGotoChild() {
       BWDeltaNode* delta_node_p = nullptr;
 
@@ -551,8 +648,6 @@ class BWTree {
         case deltaRemove:
         case deltaSplit:
           delta_node_p = (static_cast<BWDeltaNode*>(current_node_p));
-          // Push current node into the stack to facilitate back tracking
-          node_stack.push(current_node_p);
           // Make this current node
           prepareNode(static_cast<BWNode*>(delta_node_p->child_node));
           break;
@@ -562,6 +657,55 @@ class BWTree {
                     << ") does not have child node" << std::endl;
           break;
       }
+
+      return;
+    }
+
+    /*
+     * processGotoSplitSibling() - Go to split sibling of a split delta node
+     */
+    void processGotoSplitSibling() {
+      if (current_type != deltaSplit) {
+        std::cout << "Type (" << pageTypeToString(current_type)
+                    << ") does not have split sibling" << std::endl;
+        return;
+      }
+
+      BWDeltaSplitNode *split_node_p = \
+        static_cast<BWDeltaSplitNode*>(current_node_p);
+
+      prepareNodeByPID(split_node_p->split_sibling);
+
+      return;
+    }
+
+    /*
+     * processGotoSibling() - Goto sibling node (only for leaf nodes)
+     */
+    void processGotoSibling() {
+      if(current_type != leaf) {
+        std::cout << "Type (" << pageTypeToString(current_type)
+                    << ") does not have sibling node" << std::endl;
+        return;
+      }
+
+      BWLeafNode *leaf_node_p = static_cast<BWLeafNode*>(current_node_p);
+      prepareNodeByPID(leaf_node_p->next);
+
+      return;
+    }
+
+    void processGotoMergeSibling() {
+      if(current_type != deltaMerge) {
+        std::cout << "Type (" << pageTypeToString(current_type)
+                    << ") does not have merge sibling" << std::endl;
+        return;
+      }
+
+      BWDeltaMergeNode *merge_node_p = static_cast<BWDeltaMergeNode*>(current_node_p);
+
+      // Physical pointer in merge delta (PID in split delta)
+      prepareNode(merge_node_p->merge_node);
 
       return;
     }
@@ -592,6 +736,12 @@ class BWTree {
                     << ")" << std::endl;
         } else if (opcode == "goto-child") {
           processGotoChild();
+        } else if (opcode == "goto-split-sibling") {
+          processGotoSplitSibling();
+        } else if (opcode == "goto-sibling") {
+          processGotoSibling();
+        } else if (opcode == "goto-merge-sibling") {
+          processGotoMergeSibling();
         } else {
           std::cout << "Unknown command: " << opcode << std::endl;
         }
@@ -600,8 +750,18 @@ class BWTree {
       return;
     }
 
-    InteractiveDebugger(BWTree* _tree)
-        : tree(_tree), current_pid(0), current_node_p(nullptr) {}
+    InteractiveDebugger(BWTree* _tree, KeyComparator _m_key_less)
+        : tree(_tree), current_pid(0), current_node_p(nullptr),
+        next_key_id(0),
+        next_value_id(0) {
+      m_key_less_p = new KeyComparator(_m_key_less);
+      IDBKeyCmp::m_key_less_p = m_key_less_p;
+      return;
+    }
+
+    ~InteractiveDebugger() {
+      delete m_key_less_p;
+    }
   };
 
   /// //////////////////////////////////////////////////////////////
@@ -825,7 +985,7 @@ BWTree<KeyType, ValueType, KeyComparator>::BWTree(KeyComparator _m_key_less,
       m_val_equal(),
       checker(),
       epoch_mgr(),
-      idb(this) {
+      idb(this, _m_key_less) {
   // Initialize an empty tree
   KeyType low_key = KeyType::NEG_INF_KEY;
   KeyType high_key = KeyType::POS_INF_KEY;
@@ -2440,7 +2600,7 @@ BWTree<KeyType, ValueType, KeyComparator>::EpochManager::joinEpoch() {
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
 void BWTree<KeyType, ValueType,
-            KeyComparator>::BWTree::EpochManager::leaveEpoch(bw_epoch_t e) {
+            KeyComparator>::EpochManager::leaveEpoch(bw_epoch_t e) {
   lock.lock();
 
   auto it = garbage_list.find(e);
@@ -2474,7 +2634,7 @@ void BWTree<KeyType, ValueType,
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
 void BWTree<KeyType, ValueType,
-            KeyComparator>::BWTree::EpochManager::sweepAndClean() {
+            KeyComparator>::EpochManager::sweepAndClean() {
   // This could be a little bit late compared the real time epoch
   // but it is OK since we could recycle what we have missed in the next run
   bw_epoch_t e = current_epoch.load();
@@ -2513,8 +2673,7 @@ void BWTree<KeyType, ValueType,
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
 void BWTree<KeyType, ValueType,
-            KeyComparator>::BWTree::EpochManager::addGarbageNode(BWNode*
-                                                                     node_p) {
+            KeyComparator>::EpochManager::addGarbageNode(BWNode* node_p) {
   lock.lock();
   // Critical section begins
 
@@ -2535,6 +2694,9 @@ void BWTree<KeyType, ValueType,
   lock.unlock();
   return;
 }
+
+template <typename KeyType, typename ValueType, typename KeyComparator>
+KeyComparator *BWTree<KeyType, ValueType, KeyComparator>::InteractiveDebugger::IDBKeyCmp::m_key_less_p = nullptr;
 
 }  // End index namespace
 }  // End peloton namespace
