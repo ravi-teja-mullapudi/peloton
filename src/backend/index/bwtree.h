@@ -467,32 +467,32 @@ class BWTree {
     BWNode* current_node_p;
     PageType current_type;
 
-    KeyComparator *m_key_less_p;
+    KeyComparator* m_key_less_p;
 
     struct IDBKeyCmp {
-      static KeyComparator *m_key_less_p;
+      static KeyComparator* m_key_less_p;
 
-      bool operator()(KeyType &a, KeyType &b) const {
+      bool operator()(KeyType& a, KeyType& b) const {
         return (*IDBKeyCmp::m_key_less_p)(a, b);
       }
     };
 
     struct IDBValueCmp {
-      bool operator()(ValueType &a, ValueType &b) {
-        if(a.block < b.block) {
+      bool operator()(ValueType& a, ValueType& b) {
+        if (a.block < b.block) {
           return true;
         }
 
-        if(a.block > b.block) {
+        if (a.block > b.block) {
           return false;
         }
 
         // a.block == b.block if we get here...
-        if(a.offset < b.offset) {
+        if (a.offset < b.offset) {
           return true;
         }
 
-        if(a.offset >= b.offset) {
+        if (a.offset >= b.offset) {
           return false;
         }
 
@@ -513,9 +513,9 @@ class BWTree {
     /*
      * getKeyID() - Return a unique ID for each unique key
      */
-    uint64_t getKeyID(KeyType &key) {
+    uint64_t getKeyID(KeyType& key) {
       auto it = key_map.find(key);
-      if(it == key_map.end()) {
+      if (it == key_map.end()) {
         uint64_t id = next_key_id++;
         key_map[key] = id;
 
@@ -528,9 +528,9 @@ class BWTree {
     /*
      * getValueID() - Get a unique ID for each unique value
      */
-    uint64_t getValueID(ValueType &value) {
+    uint64_t getValueID(ValueType& value) {
       auto it = value_map.find(value);
-      if(it == value_map.end()) {
+      if (it == value_map.end()) {
         uint64_t id = next_value_id++;
         value_map[value] = id;
 
@@ -667,12 +667,12 @@ class BWTree {
     void processGotoSplitSibling() {
       if (current_type != deltaSplit) {
         std::cout << "Type (" << pageTypeToString(current_type)
-                    << ") does not have split sibling" << std::endl;
+                  << ") does not have split sibling" << std::endl;
         return;
       }
 
-      BWDeltaSplitNode *split_node_p = \
-        static_cast<BWDeltaSplitNode*>(current_node_p);
+      BWDeltaSplitNode* split_node_p =
+          static_cast<BWDeltaSplitNode*>(current_node_p);
 
       prepareNodeByPID(split_node_p->split_sibling);
 
@@ -683,26 +683,27 @@ class BWTree {
      * processGotoSibling() - Goto sibling node (only for leaf nodes)
      */
     void processGotoSibling() {
-      if(current_type != leaf) {
+      if (current_type != leaf) {
         std::cout << "Type (" << pageTypeToString(current_type)
-                    << ") does not have sibling node" << std::endl;
+                  << ") does not have sibling node" << std::endl;
         return;
       }
 
-      BWLeafNode *leaf_node_p = static_cast<BWLeafNode*>(current_node_p);
+      BWLeafNode* leaf_node_p = static_cast<BWLeafNode*>(current_node_p);
       prepareNodeByPID(leaf_node_p->next);
 
       return;
     }
 
     void processGotoMergeSibling() {
-      if(current_type != deltaMerge) {
+      if (current_type != deltaMerge) {
         std::cout << "Type (" << pageTypeToString(current_type)
-                    << ") does not have merge sibling" << std::endl;
+                  << ") does not have merge sibling" << std::endl;
         return;
       }
 
-      BWDeltaMergeNode *merge_node_p = static_cast<BWDeltaMergeNode*>(current_node_p);
+      BWDeltaMergeNode* merge_node_p =
+          static_cast<BWDeltaMergeNode*>(current_node_p);
 
       // Physical pointer in merge delta (PID in split delta)
       prepareNode(merge_node_p->merge_node);
@@ -751,17 +752,17 @@ class BWTree {
     }
 
     InteractiveDebugger(BWTree* _tree, KeyComparator _m_key_less)
-        : tree(_tree), current_pid(0), current_node_p(nullptr),
-        next_key_id(0),
-        next_value_id(0) {
+        : tree(_tree),
+          current_pid(0),
+          current_node_p(nullptr),
+          next_key_id(0),
+          next_value_id(0) {
       m_key_less_p = new KeyComparator(_m_key_less);
       IDBKeyCmp::m_key_less_p = m_key_less_p;
       return;
     }
 
-    ~InteractiveDebugger() {
-      delete m_key_less_p;
-    }
+    ~InteractiveDebugger() { delete m_key_less_p; }
   };
 
   /// //////////////////////////////////////////////////////////////
@@ -2477,8 +2478,8 @@ BWTree<KeyType, ValueType, KeyComparator>::EpochManager::joinEpoch() {
  * know nobody could be referencing to the nodes
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
-void BWTree<KeyType, ValueType,
-            KeyComparator>::EpochManager::leaveEpoch(bw_epoch_t e) {
+void BWTree<KeyType, ValueType, KeyComparator>::EpochManager::leaveEpoch(
+    bw_epoch_t e) {
   lock.lock();
 
   auto it = garbage_list.find(e);
@@ -2511,8 +2512,7 @@ void BWTree<KeyType, ValueType,
  * NOTE: This function must be called under critical section
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
-void BWTree<KeyType, ValueType,
-            KeyComparator>::EpochManager::sweepAndClean() {
+void BWTree<KeyType, ValueType, KeyComparator>::EpochManager::sweepAndClean() {
   // This could be a little bit late compared the real time epoch
   // but it is OK since we could recycle what we have missed in the next run
   bw_epoch_t e = current_epoch.load();
@@ -2550,8 +2550,8 @@ void BWTree<KeyType, ValueType,
  *thread
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
-void BWTree<KeyType, ValueType,
-            KeyComparator>::EpochManager::addGarbageNode(BWNode* node_p) {
+void BWTree<KeyType, ValueType, KeyComparator>::EpochManager::addGarbageNode(
+    BWNode* node_p) {
   lock.lock();
   // Critical section begins
 
@@ -2574,7 +2574,10 @@ void BWTree<KeyType, ValueType,
 }
 
 template <typename KeyType, typename ValueType, typename KeyComparator>
-KeyComparator *BWTree<KeyType, ValueType, KeyComparator>::InteractiveDebugger::IDBKeyCmp::m_key_less_p = nullptr;
+KeyComparator*
+    BWTree<KeyType, ValueType,
+           KeyComparator>::InteractiveDebugger::IDBKeyCmp::m_key_less_p =
+        nullptr;
 
 }  // End index namespace
 }  // End peloton namespace
