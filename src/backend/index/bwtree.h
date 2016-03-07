@@ -339,7 +339,7 @@ class BWTree {
 
     // Elastic container to allow for separation of consolidation, splitting
     // and merging
-    std::vector<std::pair<KeyType, ValueType>> data;
+    std::vector<std::pair<KeyType, std::vector<ValueType>>> data;
   };  // class BWLeafNode
 
   /// //////////////////////////////////////////////////////////////
@@ -626,8 +626,8 @@ class BWTree {
                                                   const KeyType& key,
                                                   PID& next_page,
                                                   KeyType& high_key);
-  std::vector<std::pair<KeyType, ValueType>> collectAllPageContents(
-      BWNode* node_p, PID& next_page, KeyType& high_key);
+  std::vector<std::pair<KeyType, std::vector<ValueType>>>
+  collectAllPageContents(BWNode* node_p, PID& next_page, KeyType& high_key);
 
   /*
    * isValueEqual() - Compare two values and see if they are equal
@@ -683,10 +683,12 @@ class BWTree {
       std::vector<std::pair<KeyType, ValueType>>& insert_records,
       std::set<std::pair<KeyType, ValueType>,
                LessFn<KeyType, ValueType, KeyComparator>>& delete_records,
-      typename std::vector<std::pair<KeyType, ValueType>>::iterator data_start,
-      typename std::vector<std::pair<KeyType, ValueType>>::iterator data_end,
+      typename std::vector<std::pair<KeyType, std::vector<ValueType>>>::iterator
+          data_start,
+      typename std::vector<std::pair<KeyType, std::vector<ValueType>>>::iterator
+          data_end,
       LessFn<KeyType, ValueType, KeyComparator>& less_fn,
-      std::vector<std::pair<KeyType, ValueType>>& output_data);
+      std::vector<std::pair<KeyType, std::vector<ValueType>>>& output_data);
 
   void consolidateModificationsInner(
       std::vector<std::pair<KeyType, PID>>& insert_records,
@@ -700,8 +702,8 @@ class BWTree {
   // Internal functions to be implemented
   void traverseAndConsolidateLeaf(
       BWNode* node, std::vector<BWNode*>& garbage_nodes,
-      std::vector<std::pair<KeyType, ValueType>>& data, PID& sibling,
-      bool& has_merge, BWNode*& merge_node, KeyType& lower_bound,
+      std::vector<std::pair<KeyType, std::vector<ValueType>>>& data,
+      PID& sibling, bool& has_merge, BWNode*& merge_node, KeyType& lower_bound,
       KeyType& upper_bound);
 
   bool consolidateLeafNode(PID id, BWNode* pid_node);
@@ -922,90 +924,20 @@ void BWTree<KeyType, ValueType, KeyComparator>::getAllValues(
   bwt_printf("Get All Values!\n");
 
   /*
-  BWNode* node_p = nullptr;
-  PID next_pid = first_leaf;
-
-  int counter = 0;
-  while (1) {
-    if (counter++ > ITER_MAX) {
-      assert(false);
-    }
-
-    if (next_pid == NONE_PID) {
-      bwt_printf("End of leaf chain, return!\n");
-
-      break;
-    }
-
-    std::vector<std::pair<KeyType, ValueType>> output;
-
-    node_p = mapping_table[next_pid].load();
-    if (node_p->type == PageType::deltaRemove) {
-      node_p = (static_cast<BWDeltaNode*>(node_p))->child_node;
-    } else if (node_p->type == PageType::deltaMerge) {
-      // For deltaMerge node just let it be, the right sibling pointer
-      // would find the correct leaf page
-      node_p = (static_cast<BWDeltaNode*>(node_p))->child_node;
-    } else if (node_p->type == PageType::deltaSplit) {
-      BWDeltaSplitNode* split_node_p = static_cast<BWDeltaSplitNode*>(node_p);
-
-      /// next_pid is not used here since we already know. Also no-SMO under
-      /// split
-      bool ret1 =
-          collectAllPageContents(split_node_p->child_node, output, &next_pid);
-      (void)ret1;
-      assert(ret1 == true);
-
-      PID split_sibling_pid = split_node_p->split_sibling;
-      BWNode* split_sibling_p = mapping_table[split_sibling_pid];
-
-      std::vector<std::pair<KeyType, ValueType>> output_2;
-      PID next_pid_2{0};
-      /// There will not be other SMOs under split(), since after split record
-      /// has been posted, every SMO must first see the split() and then fail
-      /// So we could safely assume the delta chain under split is linear and
-      /// non-SMO
-      /// Even no remove could appear under split()
-      bool ret2 = collectAllPageContents(split_sibling_p, output_2, &next_pid);
-      (void)ret2;
-      //if(ret2 == false) idb.start();
-      assert(ret2 == true);
-
-      bwt_printf("nextpid = %lu, next_pid_2 = %lu\n", next_pid, next_pid_2);
-      /// Since in a consistent state these two should points to the same page
-      /// (right)
-      /// sib of the page before split
-      // assert(next_pid == next_pid_2);
-
-      // We do not allow empty page. If this happens then must be error
-      /// NOTE: Is it possible that a page is removed too quickly so that
-      /// it becomes empty before findLeafPage() could detect that?
-      assert(output.size() != 0);
-      assert(output_2.size() != 0);
-
-      // Then conbine them together into one
-      for (auto it = output.begin(); it != output.end(); it++) {
-        result.push_back((*it).second);
-      }
-
-      for (auto it = output_2.begin(); it != output_2.end(); it++) {
-        result.push_back((*it).second);
-      }
+    while (curr_node != nullptr) {
+    PID next_page;
+    KeyType high_key;
+    std::vector<ValueType> curr_page_values =
+        collectPageContentsByKey(curr_node, key, next_page, high_key);
+    values.insert(values.end(), curr_page_values.begin(),
+                  curr_page_values.end());
+    // There is nothing more to check
+    if (next_page == NONE_PID) {
+      curr_node = nullptr;
     } else {
-      /// After this point, node_p points to a linear delta chain
-      bool ret = collectAllPageContents(node_p, output, &next_pid);
-      (void)ret;
-      assert(ret == true);
-
-      assert(output.size() != 0);
-
-      // Copy the entire array
-      for (auto it = output.begin(); it != output.end(); it++) {
-        result.push_back((*it).second);
-      }
-
-    }  // if nodetype == ...
-  }    // while(1)
+      curr_node = mapping_table[next_page];
+    }
+  }
   */
 
   return;
@@ -1014,95 +946,13 @@ void BWTree<KeyType, ValueType, KeyComparator>::getAllValues(
 /*
  * exists() - Return true if a tuple with the given key exists in the tree
  *
- * Searches through the chain of delta pages, scanning for both
- * delta record and the final leaf record
- *
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::exists(const KeyType& key) {
   bwt_printf("key = %d\n", key);
 
-  /// We are guaranteed there will not be SMO in the delta chain after
-  BWNode* node_p = spinOnSMOByKey(key);
-
-  /// If we have seen split node then this will be set
-  /// and we use two loops to test a splitted node and its sibling
-  PID sibling_pid = NONE_PID;
-
-  bool found = false;
-  bool try_sibling = false;
-  int counter = 0;
-  /*
-  while (1) {
-    if (counter++ > ITER_MAX) {
-      assert(false);
-    }
-
-    /// If there is no next page, then we are here because the key
-    /// is greater then the largest key in the tree
-    if (next_pid == NONE_PID) {
-      found = false;
-
-      break;
-    }
-
-    // If we have seen a split node in previous loop then just
-    // try its sibling
-    if (try_sibling == false) {
-      node_p = mapping_table[next_pid].load();
-    } else {
-      node_p = mapping_table[sibling_pid];
-      try_sibling = false;
-    }
-
-    assert(node_p != nullptr);
-
-    if (node_p->type == PageType::deltaRemove) {
-      node_p = (static_cast<BWDeltaNode*>(node_p))->child_node;
-    } else if (node_p->type == PageType::deltaMerge) {
-      node_p = (static_cast<BWDeltaNode*>(node_p))->child_node;
-    } else if (node_p->type == PageType::deltaSplit) {
-      BWDeltaSplitNode* split_node_p = static_cast<BWDeltaSplitNode*>(node_p);
-
-      /// We let the procedure try this in next loop
-      /// by saving its PID (rather than physical pointer which is dangerous)
-      try_sibling = true;
-      sibling_pid = split_node_p->split_sibling;
-      assert(sibling_pid != NONE_PID);
-
-      /// Direct it to the left leaf of split node first
-      node_p = split_node_p->child_node;
-    }
-
-    /// After this point, node_p points to a linear delta chain
-    std::vector<std::pair<KeyType, ValueType>> output;
-
-    /// This will not be used if try_sibling is set
-    PID next_pid;
-    /// To judge whether we need to scan the next page
-    KeyType highest_key{};
-
-    // This must succeed
-    bool ret =
-        collectPageContentsByKey(node_p, key, output, &next_pid, &highest_key);
-    assert(ret == true);
-
-    // If current is less than highest key, then we know the key only exists in
-    // current leaf page and its delta chain
-    if (key_less(key, highest_key)) {
-      // In that case the output is all of possible
-      found = output.size() != 0;
-
-      break;
-    } else if (key_equal(key, highest_key, key)) {
-      // Trivial: highest key is the same as search key
-      found = true;
-
-      break;
-    }  /// if(...)
-  }    /// while(1)
-  */
-  return found;
+  std::vector<ValueType> values = find(key);
+  return values.size() > 0;
 }
 
 /*
@@ -1114,12 +964,15 @@ BWTree<KeyType, ValueType, KeyComparator>::collectPageContentsByKey(
     BWNode* node_p, const KeyType& key, PID& next_page, KeyType& high_key) {
   std::vector<ValueType> values;
 
-  std::vector<std::pair<KeyType, ValueType>> all_records =
+  std::vector<std::pair<KeyType, std::vector<ValueType>>> all_records =
       collectAllPageContents(node_p, next_page, high_key);
 
   // Filter tuple values by key
   for (auto it = all_records.begin(); it != all_records.end(); ++it) {
-    if (key_equal(it->first, key)) values.push_back(it->second);
+    if (key_equal(it->first, key)) {
+      values.insert(values.begin(), it->second.begin(), it->second.end());
+      break;
+    }
   }
 
   return values;
@@ -1129,7 +982,7 @@ BWTree<KeyType, ValueType, KeyComparator>::collectPageContentsByKey(
  * collectAllPageContents() - Collect items on a given logical page (PID)
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
-std::vector<std::pair<KeyType, ValueType>>
+std::vector<std::pair<KeyType, std::vector<ValueType>>>
 BWTree<KeyType, ValueType, KeyComparator>::collectAllPageContents(
     BWNode* node_p, PID& next_page, KeyType& high_key) {
   using LessFnT = LessFn<KeyType, ValueType, KeyComparator>;
@@ -1137,8 +990,9 @@ BWTree<KeyType, ValueType, KeyComparator>::collectAllPageContents(
   LessFnT less_fn(m_key_less);
   BWNode* curr_node = node_p;
 
-  std::vector<std::pair<KeyType, ValueType>> all_records;
+  std::vector<std::pair<KeyType, std::vector<ValueType>>> all_records;
   std::set<std::pair<KeyType, ValueType>, LessFnT> delete_records(less_fn);
+  std::vector<std::pair<KeyType, ValueType>> insert_records;
 
   while (curr_node != nullptr) {
     switch (curr_node->type) {
@@ -1169,15 +1023,18 @@ BWTree<KeyType, ValueType, KeyComparator>::collectAllPageContents(
         // Note: The next PID of the left node in the merge should point to no
         // other node. The sibling information is part of the merge node.
         PID left_next;
-        KeyType high_key;
-        std::vector<std::pair<KeyType, ValueType>> child_contents =
+        KeyType left_high_key;
+        std::vector<std::pair<KeyType, std::vector<ValueType>>> child_contents =
             collectAllPageContents(merge_delta->child_node, left_next,
-                                   high_key);
+                                   left_high_key);
         assert(left_next == NONE_PID);
-        // Add all the collected values to the final result
+        // Add all the collected values to the vector of records to be inserted
         for (auto it = child_contents.begin(); it != child_contents.end();
              ++it) {
-          all_records.push_back(*it);
+          for (auto val_it = it->second.begin(); val_it != it->second.end();
+               val_it++) {
+            insert_records.push_back(std::make_pair(it->first, *val_it));
+          }
         }
         curr_node = merge_delta->merge_node;
         break;
@@ -1199,7 +1056,7 @@ BWTree<KeyType, ValueType, KeyComparator>::collectAllPageContents(
         }
 
         if (!found) {
-          all_records.push_back(node->ins_record);
+          insert_records.push_back(node->ins_record);
         }
 
         curr_node = node->child_node;
@@ -1216,20 +1073,45 @@ BWTree<KeyType, ValueType, KeyComparator>::collectAllPageContents(
 
         for (auto it = node->data.begin(); it != node->data.end(); ++it) {
           // If the tuple is already in the delete list ignore it
+          std::vector<ValueType> values;
           auto bounds =
               std::equal_range(delete_records.begin(), delete_records.end(),
                                std::make_pair(it->first, ValueType{}), less_fn);
+          for (auto val_it = it->second.begin(); val_it < it->second.end();
+               ++val_it) {
+            bool found = false;
+            for (auto del_it = bounds.first; del_it != bounds.second;
+                 ++del_it) {
+              if (m_val_equal(del_it->second, *val_it)) {
+                found = true;
+                break;
+              }
+            }
+            if (!found) {
+              values.push_back(*val_it);
+            }
+          }
 
+          if (values.size() > 0) {
+            all_records.push_back(std::make_pair(it->first, values));
+          }
+        }
+
+        // Add all the insert records
+        for (auto ins_it = insert_records.begin();
+             ins_it != insert_records.end(); ins_it++) {
           bool found = false;
-          for (auto del_it = bounds.first; del_it != bounds.second; ++del_it) {
-            if (m_val_equal(del_it->second, it->second)) {
+          for (auto out_it = all_records.begin(); out_it != all_records.end();
+               out_it++) {
+            if (key_equal(out_it->first, ins_it->first)) {
+              out_it->second.push_back(ins_it->second);
               found = true;
               break;
             }
           }
-
           if (!found) {
-            all_records.push_back(*it);
+            std::vector<ValueType> values{ins_it->second};
+            all_records.push_back(std::make_pair(ins_it->first, values));
           }
         }
 
@@ -1337,74 +1219,84 @@ bool BWTree<KeyType, ValueType, KeyComparator>::erase(const KeyType& key,
 template <typename KeyType, typename ValueType, class KeyComparator>
 std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
     const KeyType& key) {
-  std::vector<ValueType> values;
-
   PID curr_page;
   BWNode* curr_node;
 
-  // Find the leaf page the key can possibly map into
+  // Find the leaf page the key maps into
   std::tie(curr_page, curr_node) = findLeafPage(key);
+  PID next_page;
+  KeyType high_key;
+  std::vector<ValueType> values =
+      collectPageContentsByKey(curr_node, key, next_page, high_key);
 
-  while (curr_node != nullptr) {
-    PID next_page;
-    KeyType high_key;
-    std::vector<ValueType> curr_page_values =
-        collectPageContentsByKey(curr_node, key, next_page, high_key);
-    values.insert(values.end(), curr_page_values.begin(),
-                  curr_page_values.end());
-    // There is nothing more to check
-    if (next_page == NONE_PID) {
-      curr_node = nullptr;
-    } else {
-      // if the current node's upper bound is not less that the key we should
-      // check the next page out too
-      if (!m_key_less(key, high_key)) {
-        curr_node = mapping_table[next_page];
-      } else {
-        curr_node = nullptr;
-      }
-    }
-  }
+  // TODO
+  // Check that the high_key of the leaf page is less than that of the
+  // key being searched otherwise something has gone wrong
+  // assert(key_less(key, high_key));
 
   return values;
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::consolidateModificationsLeaf(
+    __attribute__((unused))
     std::vector<std::pair<KeyType, ValueType>>& insert_records,
     std::set<std::pair<KeyType, ValueType>,
              LessFn<KeyType, ValueType, KeyComparator>>& delete_records,
-    typename std::vector<std::pair<KeyType, ValueType>>::iterator data_start,
-    typename std::vector<std::pair<KeyType, ValueType>>::iterator data_end,
+    typename std::vector<std::pair<KeyType, std::vector<ValueType>>>::iterator
+        data_start,
+    typename std::vector<std::pair<KeyType, std::vector<ValueType>>>::iterator
+        data_end,
     LessFn<KeyType, ValueType, KeyComparator>& less_fn,
-    std::vector<std::pair<KeyType, ValueType>>& output_data) {
-  // Perform set difference
-  size_t begin_size = output_data.size();
+    std::vector<std::pair<KeyType, std::vector<ValueType>>>& output_data) {
+  using sortFnT = LessFn<KeyType, std::vector<ValueType>, KeyComparator>;
+  sortFnT sort_fn(m_key_less);
+
   for (auto it = data_start; it != data_end; ++it) {
+    std::vector<ValueType> values;
     auto bounds =
         std::equal_range(delete_records.begin(), delete_records.end(),
                          std::make_pair(it->first, ValueType{}), less_fn);
 
+    for (auto val_it = it->second.begin(); val_it != it->second.end();
+         val_it++) {
+      bool found = false;
+      for (auto del_it = bounds.first; del_it != bounds.second; ++del_it) {
+        if (m_val_equal(del_it->second, *val_it)) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        values.push_back(*val_it);
+      }
+    }
+    if (values.size() > 0) {
+      output_data.push_back(std::make_pair(it->first, values));
+    }
+  }
+
+  // Add insert elements
+  // TODO: Naive way of doing the search can be optimized
+  for (auto ins_it = insert_records.begin(); ins_it != insert_records.end();
+       ins_it++) {
     bool found = false;
-    for (auto del_it = bounds.first; del_it != bounds.second; ++del_it) {
-      if (m_val_equal(del_it->second, it->second)) {
+    for (auto out_it = output_data.begin(); out_it != output_data.end();
+         out_it++) {
+      if (key_equal(out_it->first, ins_it->first)) {
+        out_it->second.push_back(ins_it->second);
         found = true;
         break;
       }
     }
-
     if (!found) {
-      output_data.push_back(*it);
+      std::vector<ValueType> values{ins_it->second};
+      output_data.push_back(std::make_pair(ins_it->first, values));
     }
   }
-  // Add insert elements
-  size_t middle_size = output_data.size();
-  output_data.insert(output_data.end(), insert_records.begin(),
-                     insert_records.end());
-  auto begin_it = output_data.begin() + begin_size;
-  auto middle_it = output_data.begin() + middle_size;
-  // Perform merge
-  std::inplace_merge(begin_it, middle_it, output_data.end(), less_fn);
+
+  // Sort the output
+  std::sort(output_data.begin(), output_data.end(), sort_fn);
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
@@ -1437,7 +1329,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::consolidateModificationsInner(
 template <typename KeyType, typename ValueType, class KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
     BWNode* original_node, std::vector<BWNode*>& garbage_nodes,
-    std::vector<std::pair<KeyType, ValueType>>& data, PID& sibling,
+    std::vector<std::pair<KeyType, std::vector<ValueType>>>& data, PID& sibling,
     bool& has_merge, BWNode*& merge_node, KeyType& lower_bound,
     KeyType& upper_bound) {
   using LessFnT = LessFn<KeyType, ValueType, KeyComparator>;
@@ -1526,24 +1418,18 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
 
   lower_bound = leaf_node->lower_bound;
 
-  auto data_start = leaf_node->data.begin();
-  typename std::vector<std::pair<KeyType, ValueType>>::iterator data_end;
   if (has_split) {
     // Change sibling pointer if we did a split
     sibling = new_sibling;
     upper_bound = split_separator_key;
-    data_end = std::upper_bound(
-        leaf_node->data.begin(), leaf_node->data.end(), split_separator_key,
-        [=](const KeyType& l, const std::pair<KeyType, ValueType>& r)
-            -> bool { return m_key_less(l, std::get<0>(r)); });
   } else {
     sibling = leaf_node->next;
     upper_bound = leaf_node->upper_bound;
-    data_end = leaf_node->data.end();
   }
 
-  consolidateModificationsLeaf(insert_records, delete_records, data_start,
-                               data_end, less_fn, data);
+  consolidateModificationsLeaf(insert_records, delete_records,
+                               leaf_node->data.begin(), leaf_node->data.end(),
+                               less_fn, data);
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>
@@ -1553,7 +1439,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(
   BWNode* original_node = pid_node;
 
   std::vector<BWNode*> garbage_nodes;
-  std::vector<std::pair<KeyType, ValueType>> data;
+  std::vector<std::pair<KeyType, std::vector<ValueType>>> data;
   PID sibling;
   bool has_merge = false;
   BWNode* merge_node = nullptr;
@@ -1712,23 +1598,15 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
 
   lower_bound = inner_node->lower_bound;
 
-  auto base_start = inner_node->separators.begin();
-  typename std::vector<std::pair<KeyType, PID>>::iterator base_end;
   if (has_split) {
     upper_bound = split_separator_key;
-    // Find end of separators if split
-    base_end =
-        std::upper_bound(inner_node->separators.begin(),
-                         inner_node->separators.end(), split_separator_key,
-                         [=](const KeyType& l, const std::pair<KeyType, PID>& r)
-                             -> bool { return m_key_less(l, std::get<0>(r)); });
   } else {
     upper_bound = inner_node->upper_bound;
-    base_end = inner_node->separators.end();
   }
 
-  consolidateModificationsInner(insert_separators, delete_separators,
-                                base_start, base_end, less_fn, separators);
+  consolidateModificationsInner(
+      insert_separators, delete_separators, inner_node->separators.begin(),
+      inner_node->separators.end(), less_fn, separators);
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator>

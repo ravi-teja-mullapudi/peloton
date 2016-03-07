@@ -265,6 +265,12 @@ TEST(IndexTests, BasicTest) {
   locations = index->ScanKey(key0.get());
   EXPECT_EQ(locations.size(), 0);
 
+  locations = index->ScanKey(key1.get());
+  EXPECT_EQ(locations.size(), 1);
+
+  locations = index->ScanKey(key2.get());
+  EXPECT_EQ(locations.size(), 1);
+
   delete tuple_schema;
 }
 
