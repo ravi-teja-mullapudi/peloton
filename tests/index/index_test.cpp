@@ -401,7 +401,7 @@ TEST(IndexTests, DeleteTest) {
   std::unique_ptr<index::Index> index(BuildIndex());
 
   // Single threaded test
-  size_t scale_factor = 1;
+  size_t scale_factor = 100;
   LaunchParallelTest(1, InsertTest, index.get(), pool, scale_factor);
   LaunchParallelTest(1, DeleteTest, index.get(), pool, scale_factor);
 
