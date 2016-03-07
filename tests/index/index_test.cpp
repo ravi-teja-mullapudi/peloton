@@ -131,6 +131,8 @@ TEST(IndexTests, UniqueKeyTest) {
    * End of previous test
    */
 
+  delete tuple_schema;
+
   /*
    * Many key test for unique key
    */
@@ -212,7 +214,6 @@ TEST(IndexTests, UniqueKeyTest) {
 
   // This should be the last line
   delete tuple_schema;
-  tuple_schema = nullptr;
 }
 
 TEST(IndexTests, BasicTest) {
