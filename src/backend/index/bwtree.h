@@ -1149,6 +1149,14 @@ template <typename KeyType, typename ValueType, typename KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::insert(const KeyType& key,
                                                        const ValueType& value) {
   bool insert_success = false;
+
+  if (m_unique_keys) {
+    std::vector<ValueType> values = find(key);
+    // There can only be one value corresponding to a key
+    assert(values.size() <= 1);
+    if (values.size() > 0) return insert_success;
+  }
+
   do {
     // First reach the leaf page where the key should be inserted
     PID page_pid;
@@ -1193,6 +1201,10 @@ template <typename KeyType, typename ValueType, typename KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::erase(const KeyType& key,
                                                       const ValueType& value) {
   bool delete_success = false;
+
+  std::vector<ValueType> values = find(key);
+  if (values.size() == 0) return delete_success;
+
   do {
     // First reach the leaf page where the key should be inserted
     PID page_pid;
@@ -1229,10 +1241,9 @@ std::vector<ValueType> BWTree<KeyType, ValueType, KeyComparator>::find(
   std::vector<ValueType> values =
       collectPageContentsByKey(curr_node, key, next_page, high_key);
 
-  // TODO
   // Check that the high_key of the leaf page is less than that of the
   // key being searched otherwise something has gone wrong
-  // assert(key_less(key, high_key));
+  assert(key_less(key, high_key));
 
   return values;
 }
@@ -1779,8 +1790,9 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
         bwt_printf("Traversing index term insert node\n");
         BWDeltaIndexTermInsertNode* index_insert_delta =
             static_cast<BWDeltaIndexTermInsertNode*>(curr_node);
-        if (key_greater(key, index_insert_delta->new_split_separator_key) &&
-            key_lessequal(key, index_insert_delta->next_separator_key)) {
+        if (key_greaterequal(key,
+                             index_insert_delta->new_split_separator_key) &&
+            key_less(key, index_insert_delta->next_separator_key)) {
           // Shortcut to child page
           request_traverse_child = true;
           child_pid = index_insert_delta->new_split_sibling;
@@ -1796,8 +1808,8 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
         bwt_printf("Traversing index term delete node\n");
         BWDeltaIndexTermDeleteNode* index_delete_delta =
             static_cast<BWDeltaIndexTermDeleteNode*>(curr_node);
-        if (key_greater(key, index_delete_delta->merge_node_low_key) &&
-            key_lessequal(key, index_delete_delta->next_separator_key)) {
+        if (key_greaterequal(key, index_delete_delta->merge_node_low_key) &&
+            key_less(key, index_delete_delta->next_separator_key)) {
           // Shortcut to child page
           request_traverse_child = true;
           child_pid = index_delete_delta->node_to_merge_into;
@@ -1861,10 +1873,10 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
 
         // Check that we have not ended up on the wrong page for the key
         bool geq = key_greaterequal(key, leaf_node->lower_bound);
-        bool le = key_lessequal(key, leaf_node->upper_bound);
+        bool le = key_less(key, leaf_node->upper_bound);
         bwt_printf("key_greaterequal = %d\n", geq);
         bwt_printf("key_leq = %d\n", le);
-        // assert(geq && le);
+        assert(geq && le);
         still_searching = false;
         break;
       }
@@ -1939,8 +1951,8 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
 
         if (status == install_success) {
           bwt_printf("Split index parent install insert success\n");
-          if (key_greater(key, split_delta->separator_key) &&
-              key_lessequal(key, split_delta->next_separator_key)) {
+          if (key_greaterequal(key, split_delta->separator_key) &&
+              key_less(key, split_delta->next_separator_key)) {
             request_traverse_split = true;
             child_pid = split_delta->split_sibling;
           } else {

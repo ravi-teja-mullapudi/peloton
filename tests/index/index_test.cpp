@@ -169,6 +169,10 @@ TEST(IndexTests, UniqueKeyTest) {
   int counter = 0;
   for (int i = 0; i < key_list_size; i++) {
     if (((i % 2) == 0) || ((i % 3) == 0) || ((i % 5) == 0)) {
+      // Check if the values are actually present
+      item_list = index2->ScanKey(key_list[i]);
+      EXPECT_EQ(item_list.size(), 1);
+
       // Make sure delete succeeds
       ret = index2->DeleteEntry(key_list[i], item0);
       EXPECT_EQ(ret, true);

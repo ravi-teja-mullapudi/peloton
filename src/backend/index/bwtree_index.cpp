@@ -91,16 +91,17 @@ bool BWTreeIndex<KeyType, ValueType, KeyComparator,
                  KeyEqualityChecker>::InsertEntry(const storage::Tuple *key,
                                                   const ItemPointer location) {
   KeyType index_key;
+  bool status = false;
   index_key.SetFromKey(key);
   {
     // index_lock.WriteLock();
 
     // Insert the key, val pair
-    container.insert(index_key, location);
+    status = container.insert(index_key, location);
 
     // index_lock.Unlock();
   }
-  return true;
+  return status;
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator,
@@ -110,17 +111,17 @@ bool BWTreeIndex<KeyType, ValueType, KeyComparator,
                                                   const ItemPointer location) {
   KeyType index_key;
   index_key.SetFromKey(key);
-
+  bool status = false;
   {
     // index_lock.WriteLock();
 
     // Erase the key, val pair
-    container.erase(index_key, location);
+    status = container.erase(index_key, location);
 
     // index_lock.Unlock();
   }
 
-  return true;
+  return status;
 }
 
 template <typename KeyType, typename ValueType, class KeyComparator,
