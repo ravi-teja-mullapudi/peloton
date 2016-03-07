@@ -877,14 +877,16 @@ BWTree<KeyType, ValueType, KeyComparator>::~BWTree() {
  *
  * SMOs that could appear in any (leaf & inner) delta chain:
  *   - deltaSplit
- *   - deltaRemove
  *   - deltaMerge
+ *
+ * Also asserts if the node is a remove since there is nothing to consolidate
+ * in case of a remove
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::isSMO(BWNode* n) {
   PageType type = n->type;
-  return (type == PageType::deltaSplit) || (type == PageType::deltaRemove) ||
-         (type == PageType::deltaMerge);
+  assert(type != PageType::deltaRemove);
+  return (type == PageType::deltaSplit) || (type == PageType::deltaMerge);
 }
 
 /*
@@ -1168,15 +1170,9 @@ bool BWTree<KeyType, ValueType, KeyComparator>::insert(const KeyType& key,
     InstallDeltaResult result = installDeltaInsert(page_pid, node, key, value);
     if (result == install_need_consolidate) {
       insert_success = false;
-      bool consolidation_success = performConsolidation(page_pid, node);
-
       // If consolidation fails then we know some other thread
-      // has performed consolidation for us
-      // and we just try again
-      if (consolidation_success == false) {
-        // DON'T KNOW WHAT TO DO
-        // TODO: ...
-      }
+      // has performed consolidation for us and we just try again
+      performConsolidation(page_pid, node);
     } else if (result == install_try_again) {
       // Don't need consolidate, but some other threads has
       // changed the delta chain
@@ -1216,6 +1212,8 @@ bool BWTree<KeyType, ValueType, KeyComparator>::erase(const KeyType& key,
     InstallDeltaResult result = installDeltaDelete(page_pid, node, key, value);
     if (result == install_need_consolidate) {
       delete_success = false;
+      // If consolidation fails then we know some other thread
+      // has performed consolidation for us and we just try again
       performConsolidation(page_pid, node);
     } else if (result == install_try_again) {
       delete_success = false;
