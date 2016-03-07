@@ -125,11 +125,13 @@ TEST(IndexTests, UniqueKeyTest) {
 
   // Make sure it has not been inserted
   item_list = index->ScanKey(key0.get());
-  EXPECT_EQ(item_list.size(), 0);
+  EXPECT_EQ(item_list.size(), 1);
 
   /*
    * End of previous test
    */
+
+  delete tuple_schema;
 
   /*
    * Many key test for unique key
@@ -169,6 +171,10 @@ TEST(IndexTests, UniqueKeyTest) {
   int counter = 0;
   for (int i = 0; i < key_list_size; i++) {
     if (((i % 2) == 0) || ((i % 3) == 0) || ((i % 5) == 0)) {
+      // Check if the values are actually present
+      item_list = index2->ScanKey(key_list[i]);
+      EXPECT_EQ(item_list.size(), 1);
+
       // Make sure delete succeeds
       ret = index2->DeleteEntry(key_list[i], item0);
       EXPECT_EQ(ret, true);
@@ -208,7 +214,6 @@ TEST(IndexTests, UniqueKeyTest) {
 
   // This should be the last line
   delete tuple_schema;
-  tuple_schema = nullptr;
 }
 
 TEST(IndexTests, BasicTest) {
@@ -396,7 +401,7 @@ TEST(IndexTests, DeleteTest) {
   std::unique_ptr<index::Index> index(BuildIndex());
 
   // Single threaded test
-  size_t scale_factor = 1;
+  size_t scale_factor = 100;
   LaunchParallelTest(1, InsertTest, index.get(), pool, scale_factor);
   LaunchParallelTest(1, DeleteTest, index.get(), pool, scale_factor);
 
