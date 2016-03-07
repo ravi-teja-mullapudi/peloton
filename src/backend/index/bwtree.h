@@ -617,6 +617,8 @@ class BWTree {
   bool exists(const KeyType& key);
   bool erase(const KeyType& key, const ValueType& value);
 
+  size_t getMemoryFootprint() { return m_foot_print; }
+
   std::vector<ValueType> find(const KeyType& key);
   // Scan all values
   void getAllValues(std::vector<ValueType>& result);
@@ -771,6 +773,8 @@ class BWTree {
   std::atomic<PID> next_pid;
   std::vector<std::atomic<BWNode*>> mapping_table{max_table_size};
 
+  std::atomic<size_t> m_foot_print;
+
   // Not efficient but just for correctness
   std::mutex garbage_mutex;
   std::vector<BWNode*> garbage_nodes;
@@ -822,6 +826,7 @@ BWTree<KeyType, ValueType, KeyComparator>::BWTree(KeyComparator _m_key_less,
                                                   bool _m_unique_keys)
     : current_mapping_table_size(0),
       next_pid(0),
+      m_foot_print(0),
       m_key_less(_m_key_less),
       m_unique_keys(_m_unique_keys),
       m_val_equal(),
@@ -1145,7 +1150,7 @@ template <typename KeyType, typename ValueType, typename KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::insert(const KeyType& key,
                                                        const ValueType& value) {
   bool insert_success = false;
-
+  m_foot_print += 4;
   if (m_unique_keys) {
     std::vector<ValueType> values = find(key);
     // There can only be one value corresponding to a key
@@ -1197,7 +1202,7 @@ template <typename KeyType, typename ValueType, typename KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::erase(const KeyType& key,
                                                       const ValueType& value) {
   bool delete_success = false;
-
+  m_foot_print -= 4;
   std::vector<ValueType> values = find(key);
   if (values.size() == 0) return delete_success;
 
@@ -2054,8 +2059,7 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
 }
 
 // This function will assign a page ID for a given page, and put that page
-// into
-// the mapping table
+// into the mapping table
 template <typename KeyType, typename ValueType, class KeyComparator>
 typename BWTree<KeyType, ValueType, KeyComparator>::PID
 BWTree<KeyType, ValueType, KeyComparator>::installPage(BWNode* new_node_p) {

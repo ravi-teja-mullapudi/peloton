@@ -88,11 +88,10 @@ class BWTreeIndex : public Index {
 
   std::string GetTypeName() const;
 
-  // TODO: Implement this
+  // Do nothing on this the garbage collection is doing its work
   bool Cleanup() { return true; }
 
-  // TODO: Implement this
-  size_t GetMemoryFootprint() { return 0; }
+  size_t GetMemoryFootprint() { return container.getMemoryFootprint(); }
 
  protected:
   // equality checker and comparator
