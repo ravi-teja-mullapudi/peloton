@@ -908,29 +908,28 @@ BWTree<KeyType, ValueType, KeyComparator>::spinOnSMOByKey(KeyType& key) {
 
 /*
  * getAllValues() - Get all values in the tree, using key order
- *
- * This function could not use findLeafPage() since there is no key
- * relationship to use. It has to conduct its own process of traversing
- * through SMOs
- *
- * We actually do not do anything special regarding SMOs except split
- * where we could not follow the sibling pointer to get to next sibling page
- * and in that case it is this function's duty to track two branches
- * of the split and merge them into one array
  */
 template <typename KeyType, typename ValueType, typename KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::getAllValues(
-    __attribute__((unused)) std::vector<ValueType>& result) {
+    std::vector<ValueType>& result) {
   bwt_printf("Get All Values!\n");
 
-  /*
-    while (curr_node != nullptr) {
+  // This will find the left most leaf page in the tree
+  BWNode* curr_node;
+  PID start_page;
+  std::tie(start_page, curr_node) = findLeafPage(KeyType::NEG_INF_KEY);
+
+  while (curr_node != nullptr) {
     PID next_page;
     KeyType high_key;
-    std::vector<ValueType> curr_page_values =
-        collectPageContentsByKey(curr_node, key, next_page, high_key);
-    values.insert(values.end(), curr_page_values.begin(),
-                  curr_page_values.end());
+    std::vector<std::pair<KeyType, std::vector<ValueType>>> curr_page_values =
+        collectAllPageContents(curr_node, next_page, high_key);
+
+    for (auto key_it = curr_page_values.begin();
+         key_it != curr_page_values.end(); key_it++) {
+      result.insert(result.end(), key_it->second.begin(), key_it->second.end());
+    }
+
     // There is nothing more to check
     if (next_page == NONE_PID) {
       curr_node = nullptr;
@@ -938,9 +937,6 @@ void BWTree<KeyType, ValueType, KeyComparator>::getAllValues(
       curr_node = mapping_table[next_page];
     }
   }
-  */
-
-  return;
 }
 
 /*

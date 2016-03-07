@@ -125,7 +125,7 @@ TEST(IndexTests, UniqueKeyTest) {
 
   // Make sure it has not been inserted
   item_list = index->ScanKey(key0.get());
-  EXPECT_EQ(item_list.size(), 0);
+  EXPECT_EQ(item_list.size(), 1);
 
   /*
    * End of previous test
