@@ -776,8 +776,8 @@ class BWTree {
   std::atomic<size_t> m_foot_print;
 
   // Not efficient but just for correctness
-  std::mutex garbage_mutex;
-  std::vector<BWNode*> garbage_nodes;
+  std::mutex m_garbage_mutex;
+  std::vector<BWNode*> m_garbage_nodes;
 
   std::atomic<PID> m_root;
   const KeyComparator m_key_less;
@@ -863,7 +863,7 @@ BWTree<KeyType, ValueType, KeyComparator>::~BWTree() {
     // because otherwise we won't cleanup the data under the remove node
     deleteDeltaChain(node);
   }
-  for (BWNode* node : garbage_nodes) {
+  for (BWNode* node : m_garbage_nodes) {
     delete node;
   }
 }
@@ -1921,8 +1921,7 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
             status = install_success;
           } else {
             // Should cleanup the root page but for now this will be cleaned
-            // up
-            // in the destructor
+            // up in the destructor
             bwt_printf("Compare exchange with root failed, restarting...");
             status = install_node_invalid;
             request_restart_top = true;
@@ -2248,10 +2247,10 @@ void BWTree<KeyType, ValueType, KeyComparator>::deleteDeltaChain(BWNode* node) {
 template <typename KeyType, typename ValueType, typename KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::addGarbageNodes(
     std::vector<BWNode*>& garbage) {
-  while (!garbage_mutex.try_lock())
+  while (!m_garbage_mutex.try_lock())
     ;
-  garbage_nodes.insert(garbage_nodes.end(), garbage.begin(), garbage.end());
-  garbage_mutex.unlock();
+  m_garbage_nodes.insert(m_garbage_nodes.end(), garbage.begin(), garbage.end());
+  m_garbage_mutex.unlock();
 }
 
 /////////////////////////////////////////////////////////////////////
