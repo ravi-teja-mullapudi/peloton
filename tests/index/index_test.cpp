@@ -439,11 +439,11 @@ TEST(IndexTests, MultiThreadedInsertTest) {
 
   // Parallel Test
   size_t num_threads = 4;
-  size_t scale_factor = 1;
+  size_t scale_factor = 10;
   LaunchParallelTest(num_threads, InsertTest, index.get(), pool, scale_factor);
 
   locations = index->ScanAllKeys();
-  EXPECT_EQ(locations.size(), 9 * num_threads);
+  EXPECT_EQ(locations.size() * scale_factor, 9 * num_threads);
 
   std::unique_ptr<storage::Tuple> key0(new storage::Tuple(key_schema, true));
   std::unique_ptr<storage::Tuple> keynonce(
