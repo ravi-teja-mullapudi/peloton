@@ -91,6 +91,14 @@ static void dummy(const char*, ...) {}
 namespace peloton {
 namespace index {
 
+#ifdef INTERACTIVE_DEBUG
+// In multi-threaded testing, if we want to halt all threads when an error happens
+// then we lock this mutex
+// Since every other thread will try to lock this at the beginning of
+// findLeafPage() which is called for every operation, they will all stop
+static std::mutex debug_stop_mutex;
+#endif
+
 template <typename KeyType, typename ValueType, typename KeyComparator>
 struct LessFnT;
 /*
@@ -520,6 +528,8 @@ class BWTree {
 
     // Used as a buffer to hold keys
     std::vector<const KeyType*> key_list;
+    // Also used as a buffer to hold PID
+    std::vector<PID> pid_list;
 
     /*
      * getKeyID() - Return a unique ID for each unique key
@@ -1056,6 +1066,16 @@ class BWTree {
             std::cout << "Key index " << key_index << " invalid!" << std::endl;
           } else {
             std::cout << getKeyID(*key_list[key_index]) << std::endl;
+          }
+        } else if (opcode == "get-pid") {
+          int pid_index;
+          std::cin >> pid_index;
+
+          if(pid_index < 0 || pid_index >= pid_list.size()) {
+            std::cout << "PID index " << pid_index << " invalid!" << std::endl;
+          } else {
+            std::cout << "pid_list[" << pid_index << "] = " \
+            << pid_list[pid_index] << std::endl;
           }
         } else {
           std::cout << "Unknown command: " << opcode << std::endl;
@@ -2428,6 +2448,13 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
   idb.getKeyID(key);
 #endif
 
+#ifdef INTERACTIVE_DEBUG
+  // If we entered interactive debugging then it would block on
+  // lock() operation. If not if will then be running in parallel
+  debug_stop_mutex.lock();
+  debug_stop_mutex.unlock();
+#endif
+
   bwt_printf("********* Start finding the leaf page *********\n");
 
   FindLeafResult result;
@@ -2578,9 +2605,16 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
 
 #ifdef INTERACTIVE_DEBUG
         if (!(geq && (key_equal(lower_bound, upper_bound) || le))) {
+          // To block other threads
+          debug_stop_mutex.lock();
+
           // This is the violating key
           idb.key_list.push_back(&key);
+          idb.pid_list.push_back(curr_pid);
           idb.start();
+
+          // Let others go if you like (but not very useful)
+          debug_stop_mutex.unlock();
         }
 #endif
 

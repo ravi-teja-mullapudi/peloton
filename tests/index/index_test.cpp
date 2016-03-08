@@ -17,6 +17,8 @@
 #include "backend/index/index_factory.h"
 #include "backend/storage/tuple.h"
 
+#define BWTREE_DEBUG
+
 namespace peloton {
 namespace test {
 
@@ -279,8 +281,24 @@ TEST(IndexTests, BasicTest) {
   delete tuple_schema;
 }
 
+#ifdef BWTREE_DEBUG
+int thread_counter = 0;
+std::mutex thread_counter_mutex;
+#endif
+
 // INSERT HELPER FUNCTION
 void InsertTest(index::Index *index, VarlenPool *pool, size_t scale_factor) {
+
+#ifdef BWTREE_DEBUG
+  // Allocate a unique thread ID for each thread
+  // NOTE: This might change the scheduling since we
+  // now introduce lock and unlock
+  thread_counter_mutex.lock();
+  int thread_id = thread_counter++;
+  thread_counter_mutex.unlock();
+#endif
+
+  int counter = 1;
   // Loop based on scale factor
   for (size_t scale_itr = 1; scale_itr <= scale_factor; scale_itr++) {
     // Insert a bunch of keys based on scale itr
@@ -294,12 +312,16 @@ void InsertTest(index::Index *index, VarlenPool *pool, size_t scale_factor) {
 
     key0->SetValue(0, ValueFactory::GetIntegerValue(100 * scale_itr), pool);
     key0->SetValue(1, ValueFactory::GetStringValue("a"), pool);
+
     key1->SetValue(0, ValueFactory::GetIntegerValue(100 * scale_itr), pool);
     key1->SetValue(1, ValueFactory::GetStringValue("b"), pool);
+
     key2->SetValue(0, ValueFactory::GetIntegerValue(100 * scale_itr), pool);
     key2->SetValue(1, ValueFactory::GetStringValue("c"), pool);
+
     key3->SetValue(0, ValueFactory::GetIntegerValue(400 * scale_itr), pool);
     key3->SetValue(1, ValueFactory::GetStringValue("d"), pool);
+
     key4->SetValue(0, ValueFactory::GetIntegerValue(500 * scale_itr), pool);
     key4->SetValue(1, ValueFactory::GetStringValue(
                           "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
@@ -323,22 +345,51 @@ void InsertTest(index::Index *index, VarlenPool *pool, size_t scale_factor) {
                           "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
                           "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
                    pool);
+
     keynonce->SetValue(0, ValueFactory::GetIntegerValue(1000 * scale_itr),
                        pool);
     keynonce->SetValue(1, ValueFactory::GetStringValue("f"), pool);
 
     // INSERT
     index->InsertEntry(key0.get(), item0);
+#ifdef BWTREE_DEBUG
+    printf("Insert test (thread %d) %d\n", thread_id, counter++);
+#endif
     index->InsertEntry(key1.get(), item1);
+#ifdef BWTREE_DEBUG
+    printf("Insert test (thread %d) %d\n", thread_id, counter++);
+#endif
     index->InsertEntry(key1.get(), item2);
+#ifdef BWTREE_DEBUG
+    printf("Insert test (thread %d) %d\n", thread_id, counter++);
+#endif
     index->InsertEntry(key1.get(), item1);
+#ifdef BWTREE_DEBUG
+    printf("Insert test (thread %d) %d\n", thread_id, counter++);
+#endif
     index->InsertEntry(key1.get(), item1);
+#ifdef BWTREE_DEBUG
+    printf("Insert test (thread %d) %d\n", thread_id, counter++);
+#endif
     index->InsertEntry(key1.get(), item0);
-
+#ifdef BWTREE_DEBUG
+    printf("Insert test (thread %d) %d\n", thread_id, counter++);
+#endif
     index->InsertEntry(key2.get(), item1);
+#ifdef BWTREE_DEBUG
+    printf("Insert test (thread %d) %d\n", thread_id, counter++);
+#endif
     index->InsertEntry(key3.get(), item1);
+#ifdef BWTREE_DEBUG
+    printf("Insert test (thread %d) %d\n", thread_id, counter++);
+#endif
     index->InsertEntry(key4.get(), item1);
+#ifdef BWTREE_DEBUG
+    printf("Insert test (thread %d) %d\n", thread_id, counter++);
+#endif
   }
+
+  return;
 }
 
 // DELETE HELPER FUNCTION
@@ -402,6 +453,8 @@ TEST(IndexTests, DeleteTest) {
 
   // Single threaded test
   size_t scale_factor = 100;
+
+  // These two are executed sequentially
   LaunchParallelTest(1, InsertTest, index.get(), pool, scale_factor);
   LaunchParallelTest(1, DeleteTest, index.get(), pool, scale_factor);
 
@@ -443,7 +496,9 @@ TEST(IndexTests, MultiThreadedInsertTest) {
   LaunchParallelTest(num_threads, InsertTest, index.get(), pool, scale_factor);
 
   locations = index->ScanAllKeys();
-  EXPECT_EQ(locations.size() * scale_factor, 9 * num_threads);
+  // We enable duplicated-key support, so each insert should exactly
+  // increase key count by 1
+  EXPECT_EQ(locations.size(), 9 * num_threads * scale_factor);
 
   std::unique_ptr<storage::Tuple> key0(new storage::Tuple(key_schema, true));
   std::unique_ptr<storage::Tuple> keynonce(
