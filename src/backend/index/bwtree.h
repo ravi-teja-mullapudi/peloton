@@ -1996,7 +1996,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
       case deltaIndexTermInsert: {
         BWDeltaIndexTermInsertNode* insert_node =
             static_cast<BWDeltaIndexTermInsertNode*>(node);
-        if (!has_split || key_lessequal(insert_node->new_split_separator_key,
+        if (!has_split || key_less(insert_node->new_split_separator_key,
                                         split_separator_key)) {
           std::pair<KeyType, PID> ins_separator(
               insert_node->new_split_separator_key,
@@ -2323,7 +2323,7 @@ BWTree<KeyType, ValueType, KeyComparator>::searchAndInstallMerge(
         s_pid = inner_node->separators.back().second;
         for (int i = 1; i < inner_node->separators.size(); i++) {
           bwt_printf("Inside for loop, i = %d\n", i);
-          if (key_lessequal(s_upper_bound, inner_node->separators[i].first)) {
+          if (key_less(s_upper_bound, inner_node->separators[i].first)) {
             s_pid = inner_node->separators[i - 1].second;
             break;
           }
