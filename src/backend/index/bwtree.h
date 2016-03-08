@@ -83,12 +83,12 @@
   do {                             \
   } while (0);
 
+static void dummy(const char*, ...) {}
+
 #endif
 
 namespace peloton {
 namespace index {
-
-static void dummy(const char*, ...) {}
 
 template <typename KeyType, typename ValueType, typename KeyComparator>
 struct LessFnT;
