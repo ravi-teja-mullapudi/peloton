@@ -478,13 +478,13 @@ class BWTree {
     struct IDBKeyCmp {
       static KeyComparator* m_key_less_p;
 
-      bool operator()(KeyType& a, KeyType& b) const {
+      bool operator()(const KeyType& a, const KeyType& b) const {
         return (*IDBKeyCmp::m_key_less_p)(a, b);
       }
     };
 
     struct IDBValueCmp {
-      bool operator()(ValueType& a, ValueType& b) {
+      bool operator()(const ValueType& a, const ValueType& b) const {
         if (a.block < b.block) {
           return true;
         }
@@ -519,31 +519,41 @@ class BWTree {
     /*
      * getKeyID() - Return a unique ID for each unique key
      */
-    uint64_t getKeyID(KeyType& key) {
+    std::string getKeyID(const KeyType& key) {
       auto it = key_map.find(key);
       if (it == key_map.end()) {
         uint64_t id = next_key_id++;
         key_map[key] = id;
 
-        return id;
+        return std::string("key-") + std::to_string(id);
       }
 
-      return key_map[key];
+      // 0 is -inf 1 is +inf
+      if(key_map[key] == 0) {
+        return "-Inf";
+      } else if(key_map[key] == 1) {
+        return "+Inf";
+      } else {
+        return std::string("key-") + std::to_string(key_map[key]);
+      }
+
+      assert(false);
+      return "";
     }
 
     /*
      * getValueID() - Get a unique ID for each unique value
      */
-    uint64_t getValueID(ValueType& value) {
+    std::string getValueID(const ValueType& value) {
       auto it = value_map.find(value);
       if (it == value_map.end()) {
         uint64_t id = next_value_id++;
         value_map[value] = id;
 
-        return id;
+        return std::string("val-") + std::to_string(id);
       }
 
-      return value_map[value];
+      return std::string("val-") + std::to_string(value_map[value]);
     }
 
     void printPrompt() {
@@ -672,7 +682,7 @@ class BWTree {
      */
     void processGotoSplitSibling() {
       if (current_type != deltaSplit) {
-        std::cout << "Type (" << pageTypeToString(current_type)
+        std::cout << "Type (" << pageTypeToString(current_type) \
                   << ") does not have split sibling" << std::endl;
         return;
       }
@@ -690,7 +700,7 @@ class BWTree {
      */
     void processGotoSibling() {
       if (current_type != leaf) {
-        std::cout << "Type (" << pageTypeToString(current_type)
+        std::cout << "Type (" << pageTypeToString(current_type) \
                   << ") does not have sibling node" << std::endl;
         return;
       }
@@ -703,7 +713,7 @@ class BWTree {
 
     void processGotoMergeSibling() {
       if (current_type != deltaMerge) {
-        std::cout << "Type (" << pageTypeToString(current_type)
+        std::cout << "Type (" << pageTypeToString(current_type) \
                   << ") does not have merge sibling" << std::endl;
         return;
       }
@@ -717,9 +727,187 @@ class BWTree {
       return;
     }
 
+    void processPrintSep() {
+      if(current_type != inner) {
+        std::cout << "Type (" << pageTypeToString(current_type) \
+                  << ") does not have separator array" << std::endl;
+      }
+
+      BWInnerNode *inner_node_p = static_cast<BWInnerNode*>(current_node_p);
+
+      std::cout << "Number of separators: " << inner_node_p->separators.size() \
+      << std::endl;
+      for(auto it = inner_node_p->separators.begin();
+          it != inner_node_p->separators.end();
+          it++) {
+        std::cout << "[" << getKeyID(it->first) << ", " << it->second << "]" << ", ";
+      }
+
+      std::cout << std::endl;
+
+      return;
+    }
+
+    void processPrintBound() {
+      if(current_type == inner) {
+        BWInnerNode *inner_node_p = static_cast<BWInnerNode*>(current_node_p);
+        std::cout << "Lower, Upper: " << \
+        getKeyID(inner_node_p->lower_bound) << ", " << \
+        getKeyID(inner_node_p->upper_bound) << std::endl;
+      } else if(current_type == leaf) {
+        BWLeafNode *leaf_node_p = static_cast<BWLeafNode*>(current_node_p);
+        std::cout << "Lower, Upper: " << \
+        getKeyID(leaf_node_p->lower_bound) << ", " << \
+        getKeyID(leaf_node_p->upper_bound) << std::endl;
+      } else {
+
+        std::cout << "Type (" << pageTypeToString(current_type) << \
+        ") does not have bound key" << std::endl;
+      }
+
+      return;
+    }
+
+    void processPrintLeaf() {
+      if(current_type != leaf) {
+        std::cout << "Type (" << pageTypeToString(current_type)
+                  << ") does not have leaf array" << std::endl;
+      }
+
+      BWLeafNode *leaf_node_p = static_cast<BWLeafNode*>(current_node_p);
+      std::cout << "Node size: " << leaf_node_p->data.size() << std::endl;
+      for(auto it = leaf_node_p->data.begin();
+          it != leaf_node_p->data.end();
+          it++) {
+        std::cout << getKeyID(it->first) << ": [";
+        for(auto it2 = it->second.begin();
+            it2 != it->second.end();
+            it2++) {
+          std::cout << getValueID(*it2) << ", ";
+        }
+
+        std::cout << "], " << std::endl;
+      }
+
+      return;
+    }
+
+    void processGotoSep() {
+      if(current_type != inner) {
+        std::cout << "Type (" << pageTypeToString(current_type)
+                  << ") does not have separator array" << std::endl;
+      }
+
+      int index;
+      std::cin >> index;
+
+      BWInnerNode *inner_node_p = static_cast<BWInnerNode*>(current_node_p);
+      if(index < 0 || index >= inner_node_p->separators.size()) {
+        std::cout << "Index " << index << " is not valid" << std::endl;
+        return;
+      }
+
+      PID next_pid = inner_node_p->separators[index].second;
+      std::cout << "Going to PID: " << next_pid << std::endl;
+      prepareNodeByPID(next_pid);
+
+      return;
+    }
+
+    void processPrintRecord() {
+      BWDeltaSplitNode *split_node_p = nullptr;
+      BWDeltaMergeNode *merge_node_p = nullptr;
+
+      BWDeltaInsertNode *insert_node_p = nullptr;
+      BWDeltaDeleteNode *delete_node_p = nullptr;
+
+      BWDeltaIndexTermInsertNode *index_insert_node_p = nullptr;
+      BWDeltaIndexTermDeleteNode *index_delete_node_p = nullptr;
+
+      std::cout << "Node type: ";
+      std::cout << current_type << " (" << pageTypeToString(current_type)
+                    << ")" << std::endl;
+
+      switch(current_type) {
+        case leaf:
+        case inner:
+        case deltaRemove:
+          std::cout << "Type (" << pageTypeToString(current_type)
+                  << ") does not have record" << std::endl;
+          break;
+        case deltaSplit:
+          split_node_p = static_cast<BWDeltaSplitNode*>(current_node_p);
+          std::cout << "Separator key: " << getKeyID(split_node_p->separator_key) \
+          << std::endl;
+
+          std::cout << "Next Sep key: " << getKeyID(split_node_p->next_separator_key) \
+          << std::endl;
+
+          std::cout << "Sep sibling PID: " << split_node_p->split_sibling << std::endl;
+          break;
+        case deltaMerge:
+          merge_node_p = static_cast<BWDeltaMergeNode*>(current_node_p);
+          std::cout << "Separator key: " << getKeyID(merge_node_p->separator_key) \
+          << std::endl;
+
+          std::cout << "Next Sep key: " << getKeyID(merge_node_p->next_separator_key) \
+          << std::endl;
+
+          std::cout << "Removed node PID: " << merge_node_p->node_to_remove << std::endl;
+          break;
+        case deltaInsert:
+          insert_node_p = static_cast<BWDeltaInsertNode*>(current_node_p);
+
+          std::cout << "key, value = [" << getKeyID(insert_node_p->ins_record.first) << ", " \
+          << getValueID(insert_node_p->ins_record.second) << "]" << std::endl;
+
+          break;
+
+        case deltaDelete:
+          delete_node_p = static_cast<BWDeltaDeleteNode*>(current_node_p);
+
+          std::cout << "key, value = [" << getKeyID(delete_node_p->del_record.first) << ", " \
+          << getValueID(delete_node_p->del_record.second) << "]" << std::endl;
+
+          break;
+        case deltaIndexTermInsert:
+          index_insert_node_p = static_cast<BWDeltaIndexTermInsertNode*>(current_node_p);
+
+          std::cout << "New split sep: " << getKeyID(index_insert_node_p->new_split_separator_key) << std::endl;
+          std::cout << "Next split sep: " << getKeyID(index_insert_node_p->next_separator_key) << std::endl;
+          std::cout << "New child PID: " << getKeyID(index_insert_node_p->new_split_sibling) << std::endl;
+
+          break;
+        case deltaIndexTermDelete:
+          index_delete_node_p = static_cast<BWDeltaIndexTermDeleteNode*>(current_node_p);
+
+          std::cout << "Merge node low: " << getKeyID(index_delete_node_p->merge_node_low_key) << std::endl;
+          std::cout << "Rm node low: " << getKeyID(index_delete_node_p->next_separator_key) << std::endl;
+          std::cout << "Next sep: " << getKeyID(index_delete_node_p->next_separator_key) << std::endl;
+          std::cout << "Merge node PID: " << index_delete_node_p->node_to_merge_into << std::endl;
+          std::cout << "Rm node PID: " << index_delete_node_p->node_to_remove << std::endl;
+
+          break;
+        default:
+          std::cout << "Unknown node type for record: " << pageTypeToString(current_type) << std::endl;
+          assert(false);
+          break;
+      }
+
+      return;
+    }
+
+    void initKeyMap() {
+      std::cout << "Negative inf: " << getKeyID(KeyType::NEG_INF_KEY) << std::endl;
+      std::cout << "Positive inf: " << getKeyID(KeyType::POS_INF_KEY) << std::endl;
+
+      return;
+    }
+
     void start() {
       // We could not start with empty root node
       assert(prepareNodeByPID(tree->m_root.load()) == true);
+      initKeyMap();
 
       std::cout << "********* Interactive Debugger *********\n";
 
@@ -738,6 +926,12 @@ class BWTree {
           exit(0);
         } else if (opcode == "print") {
           processPrint();
+        } else if (opcode == "print-sep") {
+          processPrintSep();
+        } else if (opcode == "print-leaf") {
+          processPrintLeaf();
+        } else if (opcode == "print-bound") {
+          processPrintBound();
         } else if (opcode == "type") {
           std::cout << current_type << " (" << pageTypeToString(current_type)
                     << ")" << std::endl;
@@ -749,6 +943,10 @@ class BWTree {
           processGotoSibling();
         } else if (opcode == "goto-merge-sibling") {
           processGotoMergeSibling();
+        } else if (opcode == "goto-sep") {
+          processGotoSep();
+        } else if (opcode == "print-record") {
+          processPrintRecord();
         } else {
           std::cout << "Unknown command: " << opcode << std::endl;
         }
@@ -2114,6 +2312,8 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
   // Root should always have a valid pid
   assert(m_root != NONE_PID);
 
+  bwt_printf("********* Start finding the leaf page *********\n");
+
   FindLeafResult result;
   PID& curr_pid = result.pid;
   BWNode*& curr_pid_root_node = result.node;
@@ -2259,6 +2459,10 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
         bwt_printf("key_le = %d\n", le);
         bwt_printf("(lower == upper) = %d\n",
                    key_equal(lower_bound, upper_bound));
+        if(!(geq && (key_equal(lower_bound, upper_bound) || le))) {
+          idb.start();
+        }
+
         assert(geq && (key_equal(lower_bound, upper_bound) || le));
 #endif
         still_searching = false;
