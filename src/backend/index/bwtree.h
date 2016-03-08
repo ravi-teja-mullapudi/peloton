@@ -1046,12 +1046,9 @@ class BWTree {
           std::cin >> target_pid;
           prepareNodeByPID(target_pid);
         } else if (opcode == "get-key-id") {
-<<<<<<< HEAD
           // We push the target key of findLeafPage() into key_list
           // when we hit the assertion, and then invoke the debugger
           // then we could use its index to see the relative position of the key
-=======
->>>>>>> f3ca9fd405f9b827cbacbf216811082211a6c701
           int key_index;
           std::cin >> key_index;
 
@@ -2889,6 +2886,39 @@ BWTree<KeyType, ValueType, KeyComparator>::installIndexTermDeltaInsert(
   KeyType new_separator_key = split_node->separator_key;
   PID split_sibling = split_node->split_sibling;
   KeyType next_separator_key = split_node->next_separator_key;
+
+  // Check if already installed
+  BWNode* c_node = old_inner_p;
+  while (c_node != nullptr) {
+    switch (c_node->type) {
+      case deltaIndexTermInsert: {
+        BWDeltaIndexTermInsertNode* insert_node =
+            static_cast<BWDeltaIndexTermInsertNode*>(c_node);
+        if (insert_node->new_split_sibling == split_sibling) {
+            return install_success;
+        }
+        c_node = insert_node->child_node;
+        break;
+      }
+      case inner: {
+        // Same as split, invariant is that merge nodes always force a
+        // consolidate, so should be at the top
+        BWInnerNode* inner_node = static_cast<BWInnerNode*>(c_node);
+        for (int i = 0; i < inner_node->separators.size(); i++) {
+          bwt_printf("Inside for loop, i = %d\n", i);
+          if (inner_node->separators[i].second == split_sibling) {
+            return install_success;
+          }
+        }
+        c_node = nullptr;
+        break;
+      }
+      default: {
+        BWDeltaNode* delta = static_cast<BWDeltaNode*>(c_node);
+        c_node = delta->child_node;
+      }
+    }
+  }
   BWNode* new_inner_p = (BWNode*)new BWDeltaIndexTermInsertNode(
       old_inner_p, new_separator_key, split_sibling, next_separator_key);
 
