@@ -2774,34 +2774,34 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
 
         bwt_printf("leaf_node_size = %lu\n", leaf_node->data.size());
 
-// Check that we have not ended up on the wrong page for the key
-#ifdef BWTREE_DEBUG
         KeyType lower_bound;
         KeyType upper_bound;
         std::tie(lower_bound, upper_bound) = findBounds(curr_node);
         bool geq = key_greaterequal(key, lower_bound);
+        idb_assert(geq);
         bool le = key_less(key, upper_bound);
-        bwt_printf("key_greaterequal = %d\n", geq);
-        bwt_printf("key_le = %d\n", le);
-        bwt_printf("(lower == upper) = %d\n",
-                   key_equal(lower_bound, upper_bound));
+        if (!le) {
+          // Traverse to sibling
+          request_traverse_split = true;
+          child_pid = leaf_node->next;
+        } else {
+
+// Check that we have not ended up on the wrong page for the key
+#ifdef BWTREE_DEBUG
+          bwt_printf("key_greaterequal = %d\n", geq);
+          bwt_printf("key_le = %d\n", le);
+          bwt_printf("(lower == upper) = %d\n",
+                     key_equal(lower_bound, upper_bound));
 
 #ifdef INTERACTIVE_DEBUG
-        idb_assert_key(key, geq && (key_equal(lower_bound, upper_bound) || le));
-        // To block other threads
-        debug_stop_mutex.lock();
-
-        // This is the violating key
-        idb.key_list.push_back(&key);
-        idb.pid_list.push_back(curr_pid);
-        idb.start();
-
-        // Let others go if you like (but not very useful)
-        debug_stop_mutex.unlock();
+          idb.pid_list.push_back(curr_pid);
+          idb_assert_key(key, geq && (key_equal(lower_bound, upper_bound) || le));
+          idb.pid_list.pop_back();
 #endif
 
 #endif
-        still_searching = false;
+          still_searching = false;
+        }
         break;
       }
       ////////////////////////////////////////////////////////////////////////////
