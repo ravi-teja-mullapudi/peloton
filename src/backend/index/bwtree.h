@@ -1046,9 +1046,12 @@ class BWTree {
           std::cin >> target_pid;
           prepareNodeByPID(target_pid);
         } else if (opcode == "get-key-id") {
+<<<<<<< HEAD
           // We push the target key of findLeafPage() into key_list
           // when we hit the assertion, and then invoke the debugger
           // then we could use its index to see the relative position of the key
+=======
+>>>>>>> f3ca9fd405f9b827cbacbf216811082211a6c701
           int key_index;
           std::cin >> key_index;
 
