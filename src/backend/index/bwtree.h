@@ -25,6 +25,7 @@
 #include "backend/common/logger.h"
 
 #define BWTREE_DEBUG
+#define INTERACTIVE_DEBUG
 
 #ifdef BWTREE_DEBUG
 
@@ -517,6 +518,9 @@ class BWTree {
     std::stack<PID> pid_stack;
     std::stack<bool> need_switch_stack;
 
+    // Used as a buffer to hold keys
+    std::vector<const KeyType*> key_list;
+
     /*
      * getKeyID() - Return a unique ID for each unique key
      */
@@ -532,7 +536,7 @@ class BWTree {
       // 0 is -inf 1 is +inf
       if (key_map[key] == 0) {
         return "-Inf";
-      } else if (key_map[key] == 1) {
+      } else if (key_map[key] == key_map.size() - 1) {
         return "+Inf";
       } else {
         return std::string("key-") + std::to_string(key_map[key]);
@@ -558,7 +562,9 @@ class BWTree {
     }
 
     void printPrompt() {
-      std::cout << "[PID=" << current_pid << "]>>";
+      std::cout << "[(" << pageTypeToString(current_type)
+                << ") PID=" << current_pid << "]>> ";
+
       return;
     }
 
@@ -966,10 +972,23 @@ class BWTree {
       return;
     }
 
+    /*
+     * sortKeyMap() - Sort all keys so that key ID reflects key order
+     */
+    void sortKeyMap() {
+      uint64_t counter = 0;
+      for (auto it = key_map.begin(); it != key_map.end(); it++) {
+        // -inf = 0; + inf = key_map.size() - 1
+        it->second = counter++;
+      }
+
+      return;
+    }
+
     void start() {
       // We could not start with empty root node
       assert(prepareNodeByPID(tree->m_root.load(), true) == true);
-      initKeyMap();
+      sortKeyMap();
 
       std::cout << "********* Interactive Debugger *********\n";
 
@@ -984,20 +1003,26 @@ class BWTree {
           return;
         }
 
+        // Ctrl-D (EOF)  will resume execution
         if (opcode == "exit") {
           exit(0);
         } else if (opcode == "print") {
           processPrint();
         } else if (opcode == "print-sep") {
+          // print sep-PID pairs for inner node
           processPrintSep();
         } else if (opcode == "print-leaf") {
+          // print key-value_list pairs for leaf node
           processPrintLeaf();
         } else if (opcode == "print-bound") {
+          // print lower and upper bound for leaf and inenr node
           processPrintBound();
         } else if (opcode == "type") {
           std::cout << current_type << " (" << pageTypeToString(current_type)
                     << ")" << std::endl;
         } else if (opcode == "goto-child") {
+          // Goto child node pointed to by a physical pointer
+          // in delta nodes
           processGotoChild();
         } else if (opcode == "goto-split-sibling") {
           processGotoSplitSibling();
@@ -1008,13 +1033,33 @@ class BWTree {
         } else if (opcode == "goto-sep") {
           processGotoSep();
         } else if (opcode == "print-record") {
+          // For delta nodes, print the content
           processPrintRecord();
         } else if (opcode == "back") {
+          // Go back to the previous position
+          // (switch between PID and PID root and current node
+          // is done using stacks)
           processBack();
         } else if (opcode == "goto-pid") {
+          // Goto the first page pointed to by a PID
           uint64_t target_pid;
           std::cin >> target_pid;
           prepareNodeByPID(target_pid);
+        } else if (opcode == "get-key-id") {
+<<<<<<< HEAD
+          // We push the target key of findLeafPage() into key_list
+          // when we hit the assertion, and then invoke the debugger
+          // then we could use its index to see the relative position of the key
+=======
+>>>>>>> f3ca9fd405f9b827cbacbf216811082211a6c701
+          int key_index;
+          std::cin >> key_index;
+
+          if (key_index < 0 || key_index >= key_list.size()) {
+            std::cout << "Key index " << key_index << " invalid!" << std::endl;
+          } else {
+            std::cout << getKeyID(*key_list[key_index]) << std::endl;
+          }
         } else {
           std::cout << "Unknown command: " << opcode << std::endl;
         }
@@ -1031,6 +1076,9 @@ class BWTree {
           next_value_id(0) {
       m_key_less_p = new KeyComparator(_m_key_less);
       IDBKeyCmp::m_key_less_p = m_key_less_p;
+
+      initKeyMap();
+
       return;
     }
 
@@ -2377,6 +2425,12 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
   // Root should always have a valid pid
   assert(m_root != NONE_PID);
 
+// Every user method must go through this function, so let's register key
+// here and then sort it
+#ifdef INTERACTIVE_DEBUG
+  idb.getKeyID(key);
+#endif
+
   bwt_printf("********* Start finding the leaf page *********\n");
 
   FindLeafResult result;
@@ -2524,9 +2578,14 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
         bwt_printf("key_le = %d\n", le);
         bwt_printf("(lower == upper) = %d\n",
                    key_equal(lower_bound, upper_bound));
+
+#ifdef INTERACTIVE_DEBUG
         if (!(geq && (key_equal(lower_bound, upper_bound) || le))) {
+          // This is the violating key
+          idb.key_list.push_back(&key);
           idb.start();
         }
+#endif
 
         assert(geq && (key_equal(lower_bound, upper_bound) || le));
 #endif
