@@ -129,10 +129,10 @@ class BWTree {
   // Threshold of delta chain length on a leaf node to trigger a consolidate
   constexpr static unsigned int DELTA_CHAIN_LEAF_THRESHOLD = 8;
   // Node sizes for triggering splits and merges on inner nodes
-  constexpr static unsigned int INNER_NODE_SIZE_MIN = 0;
+  constexpr static unsigned int INNER_NODE_SIZE_MIN = 4;
   constexpr static unsigned int INNER_NODE_SIZE_MAX = 16;
   // Node sizes for triggering splits and merges on leaf nodes
-  constexpr static unsigned int LEAF_NODE_SIZE_MIN = 0;
+  constexpr static unsigned int LEAF_NODE_SIZE_MIN = 10;
   constexpr static unsigned int LEAF_NODE_SIZE_MAX = 31;
   // Debug constant: The maximum number of iterations we could do
   // It prevents dead loop hopefully
@@ -913,7 +913,7 @@ class BWTree {
                     << getKeyID(index_delete_node_p->merge_node_low_key)
                     << std::endl;
           std::cout << "Rm node low: "
-                    << getKeyID(index_delete_node_p->next_separator_key)
+                    << getKeyID(index_delete_node_p->remove_node_low_key)
                     << std::endl;
           std::cout << "Next sep: "
                     << getKeyID(index_delete_node_p->next_separator_key)
@@ -2368,7 +2368,7 @@ BWTree<KeyType, ValueType, KeyComparator>::searchAndInstallMerge(
         s_pid = inner_node->separators.back().second;
         for (int i = 1; i < inner_node->separators.size(); i++) {
           bwt_printf("Inside for loop, i = %d\n", i);
-          if (key_less(s_upper_bound, inner_node->separators[i].first)) {
+          if (key_lessequal(s_upper_bound, inner_node->separators[i].first)) {
             s_pid = inner_node->separators[i - 1].second;
             break;
           }
@@ -2380,9 +2380,9 @@ BWTree<KeyType, ValueType, KeyComparator>::searchAndInstallMerge(
         assert(false);
     }
   }
+  bwt_printf("s_pid %lu\n", s_pid);
   assert(s_pid != NONE_PID);
   assert(s_pid != leaf_info.pid);
-  bwt_printf("s_pid %lu\n", s_pid);
   BWNode* sibling_node = mapping_table[s_pid].load();
 
   InstallDeltaResult status = install_try_again;
@@ -2942,9 +2942,46 @@ BWTree<KeyType, ValueType, KeyComparator>::installIndexTermDeltaDelete(
     return install_need_consolidate;
   }
 
+  // Check if already installed
+  BWNode* c_node = old_inner_p;
+  while (c_node != nullptr) {
+    switch (c_node->type) {
+      case deltaIndexTermDelete: {
+        BWDeltaIndexTermDeleteNode* delete_node =
+            static_cast<BWDeltaIndexTermDeleteNode*>(c_node);
+        if (delete_node->node_to_remove == merge_node->node_to_remove) {
+            return install_success;
+        }
+        c_node = delete_node->child_node;
+        break;
+      }
+      case inner: {
+        // Same as split, invariant is that merge nodes always force a
+        // consolidate, so should be at the top
+        BWInnerNode* inner_node = static_cast<BWInnerNode*>(c_node);
+        bool found = false;
+        for (int i = 0; i < inner_node->separators.size(); i++) {
+          bwt_printf("Inside for loop, i = %d\n", i);
+          if (inner_node->separators[i].second == merge_node->node_to_remove) {
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          return install_success;
+        }
+        c_node = nullptr;
+        break;
+      }
+      default: {
+        BWDeltaNode* delta = static_cast<BWDeltaNode*>(c_node);
+        c_node = delta->child_node;
+      }
+    }
+  }
   BWNode* new_inner_p = (BWNode*)new BWDeltaIndexTermDeleteNode(
       old_inner_p, merge_pid, merge_node->node_to_remove,
-      findBounds(old_inner_p).first, merge_node->separator_key,
+      findBounds(merge_node).first, merge_node->separator_key,
       merge_node->next_separator_key);
 
   bool cas_success =
