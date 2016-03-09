@@ -17,7 +17,7 @@
 #include "backend/index/index_factory.h"
 #include "backend/storage/tuple.h"
 
-#define BWTREE_DEBUG
+//#define BWTREE_DEBUG
 
 namespace peloton {
 namespace test {
@@ -298,7 +298,9 @@ void InsertTest(index::Index *index, VarlenPool *pool, size_t scale_factor) {
   thread_counter_mutex.unlock();
 #endif
 
+#ifdef BWTREE_DEBUG
   int counter = 1;
+#endif
   // Loop based on scale factor
   for (size_t scale_itr = 1; scale_itr <= scale_factor; scale_itr++) {
     // Insert a bunch of keys based on scale itr
@@ -491,8 +493,8 @@ TEST(IndexTests, MultiThreadedInsertTest) {
   std::unique_ptr<index::Index> index(BuildIndex());
 
   // Parallel Test
-  size_t num_threads = 4;
-  size_t scale_factor = 10;
+  size_t num_threads = 40;
+  size_t scale_factor = 100;
   LaunchParallelTest(num_threads, InsertTest, index.get(), pool, scale_factor);
 
   locations = index->ScanAllKeys();
