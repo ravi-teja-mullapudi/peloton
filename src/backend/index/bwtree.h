@@ -1010,10 +1010,12 @@ class BWTree {
     }
 
     void initKeyMap() {
-      std::cout << "Negative inf: " << getKeyID(KeyType::NEG_INF_KEY)
-                << std::endl;
-      std::cout << "Positive inf: " << getKeyID(KeyType::POS_INF_KEY)
-                << std::endl;
+      // std::cout << "Negative inf: " << getKeyID(KeyType::NEG_INF_KEY)
+      //           << std::endl;
+      // std::cout << "Positive inf: " << getKeyID(KeyType::POS_INF_KEY)
+      //           << std::endl;
+      getKeyID(KeyType::NEG_INF_KEY);
+      getKeyID(KeyType::POS_INF_KEY);
 
       return;
     }
@@ -1950,6 +1952,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
         new_sibling = split_node->split_sibling;
 
         // Try to install IndexTermDeltaInsert
+        if (!leaf_info.parent_pids.empty()) {
         InstallDeltaResult status = install_try_again;
         FindLeafResult temp = leaf_info;
         while (status != install_success) {
@@ -1977,6 +1980,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
           temp.parent_nodes.back() =
             mapping_table[temp.parent_pids.back()].load();
         }
+        }
         break;
       }
       case deltaMerge: {
@@ -1990,6 +1994,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
 
 
         // Try to install IndexTermDeltaDelete
+        if (!leaf_info.parent_pids.empty()) {
         InstallDeltaResult status = install_try_again;
         FindLeafResult temp = leaf_info;
         while (status != install_success) {
@@ -2017,6 +2022,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
 
           temp.parent_nodes.back() =
             mapping_table[temp.parent_pids.back()].load();
+        }
         }
         break;
       }
@@ -2206,32 +2212,34 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
 
 
         // Try to install IndexTermDeltaInsert
-        InstallDeltaResult status = install_try_again;
-        FindLeafResult temp = leaf_info;
-        while (status != install_success) {
-          status = installIndexTermDeltaInsert(temp.parent_pids.back(),
-                                               temp.parent_nodes.back(),
-                                               split_node);
-          if (status == install_need_consolidate) {
-            // We don't have to do this refind but it's easier than fixing
-            // up the FindLeafResult to point to the parent for now
-            PID temp_pid = temp.pid;
-            BWNode* temp_node = temp.node;
-            temp.pid = temp.parent_pids.back();
-            temp.node = temp.parent_nodes.back();
-            temp.parent_pids.pop_back();
-            temp.parent_nodes.pop_back();
+        if (!leaf_info.parent_pids.empty()) {
+          InstallDeltaResult status = install_try_again;
+          FindLeafResult temp = leaf_info;
+          while (status != install_success) {
+            status = installIndexTermDeltaInsert(temp.parent_pids.back(),
+                                                 temp.parent_nodes.back(),
+                                                 split_node);
+            if (status == install_need_consolidate) {
+              // We don't have to do this refind but it's easier than fixing
+              // up the FindLeafResult to point to the parent for now
+              PID temp_pid = temp.pid;
+              BWNode* temp_node = temp.node;
+              temp.pid = temp.parent_pids.back();
+              temp.node = temp.parent_nodes.back();
+              temp.parent_pids.pop_back();
+              temp.parent_nodes.pop_back();
 
-            performConsolidation(temp);
+              performConsolidation(temp);
 
-            temp.parent_pids.push_back(temp.pid);
-            temp.parent_nodes.push_back(temp.node);
-            temp.pid = temp_pid;
-            temp.node = temp_node;
+              temp.parent_pids.push_back(temp.pid);
+              temp.parent_nodes.push_back(temp.node);
+              temp.pid = temp_pid;
+              temp.node = temp_node;
+            }
+
+            temp.parent_nodes.back() =
+              mapping_table[temp.parent_pids.back()].load();
           }
-
-          temp.parent_nodes.back() =
-            mapping_table[temp.parent_pids.back()].load();
         }
         break;
       }
@@ -2244,6 +2252,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
         merge_separator_key = merge_delta->separator_key;
         merge_node = merge_delta->merge_node;
 
+        if (!leaf_info.parent_pids.empty()) {
         InstallDeltaResult status = install_try_again;
         FindLeafResult temp = leaf_info;
         while (status != install_success) {
@@ -2271,6 +2280,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
 
           temp.parent_nodes.back() =
             mapping_table[temp.parent_pids.back()].load();
+        }
         }
         
         break;
@@ -2778,6 +2788,7 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
         KeyType upper_bound;
         std::tie(lower_bound, upper_bound) = findBounds(curr_node);
         bool geq = key_greaterequal(key, lower_bound);
+        (void)geq;
         idb_assert(geq);
         bool le = key_less(key, upper_bound);
         if (!le) {
