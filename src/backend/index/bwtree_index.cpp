@@ -128,12 +128,35 @@ template <typename KeyType, typename ValueType, class KeyComparator,
           class KeyEqualityChecker>
 std::vector<ItemPointer>
 BWTreeIndex<KeyType, ValueType, KeyComparator, KeyEqualityChecker>::Scan(
-    __attribute__((unused)) const std::vector<Value> &values,
-    __attribute__((unused)) const std::vector<oid_t> &key_column_ids,
-    __attribute__((unused)) const std::vector<ExpressionType> &expr_types,
-    __attribute__((unused)) const ScanDirectionType &scan_direction) {
+    const std::vector<Value> &values, const std::vector<oid_t> &key_column_ids,
+    const std::vector<ExpressionType> &expr_types,
+    const ScanDirectionType &scan_direction) {
   std::vector<ItemPointer> result;
-  // Add your implementation here
+
+  std::vector<std::pair<BoundedKey<KeyType>, std::vector<ValueType>>>
+      key_value_result;
+  container.getAllKeyValues(key_value_result);
+
+  for (auto it = key_value_result.begin(); it != key_value_result.end(); it++) {
+    auto t = it->first.key.GetTupleForComparison(metadata->GetKeySchema());
+
+    if (Compare(t, key_column_ids, expr_types, values) == true) {
+      result.insert(result.end(), it->second.begin(), it->second.end());
+    }
+  }
+
+  switch (scan_direction) {
+    case SCAN_DIRECTION_TYPE_FORWARD:
+      break;
+    case SCAN_DIRECTION_TYPE_BACKWARD:
+      std::reverse(result.begin(), result.end());
+      break;
+    case SCAN_DIRECTION_TYPE_INVALID:
+    default:
+      throw Exception("Invalid scan direction \n");
+      break;
+  }
+
   return result;
 }
 
