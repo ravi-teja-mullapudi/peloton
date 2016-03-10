@@ -26,8 +26,8 @@
 #include "backend/common/logger.h"
 #include "backend/index/index_key.h"
 
-#define BWTREE_DEBUG
-#define INTERACTIVE_DEBUG
+//#define BWTREE_DEBUG
+//#define INTERACTIVE_DEBUG
 
 #ifdef INTERACTIVE_DEBUG
 
@@ -3093,10 +3093,10 @@ void BWTree<KeyType, ValueType, KeyComparator>::installIndexTermDeltaInsert(
       return;
     }
 
-    auto b = findBounds(split_node);
-    idb_assert(key_equal(b.second, new_separator_key));
-    auto b2 = findBounds(mapping_table[split_sibling].load());
-    idb_assert(key_equal(b2.first, new_separator_key));
+    // auto b = findBounds(split_node);
+    // idb_assert(key_equal(b.second, new_separator_key));
+    // auto b2 = findBounds(mapping_table[split_sibling].load());
+    // idb_assert(key_equal(b2.first, new_separator_key));
     // idb_assert(key_equal(b2.second, next_separator_key));
 
     idb_assert(key_lessequal(new_separator_key, next_separator_key));
