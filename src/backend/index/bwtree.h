@@ -32,19 +32,23 @@
 #define idb_assert(cond)                        \
   do {                                          \
     if (!(cond)) {                              \
+      debug_stop_mutex.lock();                  \
       printf("assert, %-24s, line %d \033[0m",  \
              __FUNCTION__, __LINE__);           \
       idb.start();                              \
+      debug_stop_mutex.unlock();                \
     }                                           \
   } while (0);
 
 #define idb_assert_key(key, cond)                       \
   do {                                                  \
     if (!(cond)) {                                      \
+      debug_stop_mutex.lock();                          \
       printf("assert, %-24s, line %d \033[0m",          \
              __FUNCTION__, __LINE__);                   \
       idb.key_list.push_back(&key);                     \
       idb.start();                                      \
+      debug_stop_mutex.unlock();                        \
     }                                                   \
   } while (0);
 
@@ -143,12 +147,12 @@ struct LessFnT;
  * This is required by std::sort in order to consolidate pages
  * This function object compares tuples by its key (less than relation)
  */
-template <typename KeyType, typename ValueType, class KeyComparator>
+template <typename KeyType, typename Value, class KeyComparator>
 struct LessFn {
   LessFn(const KeyComparator& comp) : m_key_less(comp) {}
 
-  bool operator()(const std::pair<KeyType, ValueType>& l,
-                  const std::pair<KeyType, ValueType>& r) const {
+  bool operator()(const std::pair<KeyType, Value>& l,
+                  const std::pair<KeyType, Value>& r) const {
     return m_key_less(std::get<0>(l), std::get<0>(r));
   }
 
@@ -169,7 +173,7 @@ class BWTree {
   /// Performance configuration constants
   constexpr static unsigned int max_table_size = 1 << 24;
   // Threshold of delta chain length on an inner node to trigger a consolidate
-  constexpr static unsigned int DELTA_CHAIN_INNER_THRESHOLD = 8;
+  constexpr static unsigned int DELTA_CHAIN_INNER_THRESHOLD = 2;
   // Threshold of delta chain length on a leaf node to trigger a consolidate
   constexpr static unsigned int DELTA_CHAIN_LEAF_THRESHOLD = 8;
   // Node sizes for triggering splits and merges on inner nodes
@@ -205,6 +209,7 @@ class BWTree {
     install_try_again,
     install_node_invalid,
     install_need_consolidate,
+    install_is_remove,
   };
 
   /*
@@ -1219,6 +1224,20 @@ class BWTree {
     BWNode* node;
     std::vector<PID> parent_pids;
     std::vector<BWNode*> parent_nodes;
+
+    void push(PID n_pid, BWNode* n_node) {
+      parent_pids.push_back(pid);
+      parent_nodes.push_back(node);
+      pid = n_pid;
+      node = n_node;
+    }
+
+    void pop() {
+      pid = parent_pids.back();
+      node = parent_nodes.back();
+      parent_pids.pop_back();
+      parent_nodes.pop_back();
+    }
   };
 
   // Input invariants:
@@ -1247,34 +1266,35 @@ class BWTree {
       std::vector<std::pair<KeyType, PID>>& output_data);
 
   void traverseAndConsolidateLeaf(
-    const FindLeafResult& leaf_info,
+      FindLeafResult& leaf_info,
       BWNode* node, std::vector<BWNode*>& garbage_nodes,
       std::vector<std::pair<KeyType, std::vector<ValueType>>>& data,
       PID& sibling, bool& has_merge, BWNode*& merge_node, KeyType& lower_bound,
       KeyType& upper_bound);
 
-  bool consolidateLeafNode(const FindLeafResult& leaf_info);
+  bool consolidateLeafNode(FindLeafResult& leaf_info);
 
   void traverseAndConsolidateInner(
-      const FindLeafResult& leaf_info,
+      FindLeafResult& leaf_info,
       BWNode* node, std::vector<BWNode*>& garbage_nodes,
       std::vector<std::pair<KeyType, PID>>& separators, bool& has_merge,
       BWNode*& merge_node, KeyType& lower_bound, KeyType& upper_bound);
 
-  bool consolidateInnerNode(const FindLeafResult& leaf_info);
+  bool consolidateInnerNode(FindLeafResult& leaf_info);
 
   std::pair<KeyType, KeyType> findBounds(const BWNode* node);
 
   bool isLeaf(BWNode* node);
 
-  bool performConsolidation(const FindLeafResult& leaf_info);
+  bool performConsolidation(FindLeafResult& leaf_info);
 
-  bool isSMO(BWNode* n);
+  bool fixSMO(FindLeafResult& info, bool& isSMO);
 
-  // Functions to install SMO deltas
-  PID searchAndInstallMerge(const FindLeafResult& leaf_info);
+  void fixSMOForInstall(FindLeafResult& info);
 
   FindLeafResult findLeafPage(const KeyType& key);
+
+  FindLeafResult findPID(PID pid);
 
   BWNode* spinOnSMOByKey(KeyType& key);
 
@@ -1284,28 +1304,21 @@ class BWTree {
   // with the same PID
   PID installPage(BWNode* new_node_p);
 
+  PID findNext(BWNode* node);
   // This only applies to leaf node - For intermediate nodes
   // the insertion of sep/child pair must be done using different
   // insertion method
-  InstallDeltaResult installDeltaInsert(PID leaf_pid, BWNode* leaf_ndoe,
-                                        const KeyType& key,
-                                        const ValueType& value);
+  void installDeltaInsert(const FindLeafResult& leaf_info, const KeyType& key,
+                          const ValueType& value);
 
-  InstallDeltaResult installDeltaDelete(PID leaf_pid, BWNode* leaf_node,
-                                        const KeyType& key,
-                                        const ValueType& value);
+  void installDeltaDelete(const FindLeafResult& leaf_info, const KeyType& key,
+                          const ValueType& value);
 
-  InstallDeltaResult installIndexTermDeltaInsert(
-      PID pid, BWNode* inner_node, const BWDeltaSplitNode* split_node);
+  void installIndexTermDeltaInsert(FindLeafResult& leaf_info);
 
-  InstallDeltaResult installIndexTermDeltaDelete(PID node, BWNode* inner_node,
-                                                 PID merge_pid,
-                                                 BWDeltaMergeNode* merge_node);
+  void installIndexTermDeltaDelete(FindLeafResult& leaf_info);
 
-  InstallDeltaResult installDeltaMerge(PID pid, BWNode* node, PID remove_pid,
-                                       KeyType remove_lower_bound,
-                                       BWNode* remove_node,
-                                       KeyType remove_upper_bound);
+  void installDeltaMerge(FindLeafResult& leaf_info);
 
   void deleteDeltaChain(BWNode* node);
 
@@ -1418,27 +1431,6 @@ BWTree<KeyType, ValueType, KeyComparator>::~BWTree() {
   for (BWNode* node : m_garbage_nodes) {
     delete node;
   }
-}
-
-/*
- * isSMO() - Returns true if the target is a SMO operation
- *
- * We maintain the invariant that if SMO is going to appear in delta chian,
- * then it must be the first on it. Every routine that sees an SMO on delta
- * must then consolidate it in order to append new delta record
- *
- * SMOs that could appear in any (leaf & inner) delta chain:
- *   - deltaSplit
- *   - deltaMerge
- *
- * Also asserts if the node is a remove since there is nothing to consolidate
- * in case of a remove
- */
-template <typename KeyType, typename ValueType, typename KeyComparator>
-bool BWTree<KeyType, ValueType, KeyComparator>::isSMO(BWNode* n) {
-  PageType type = n->type;
-  idb_assert(type != PageType::deltaRemove);
-  return (type == PageType::deltaSplit) || (type == PageType::deltaMerge);
 }
 
 /*
@@ -1701,37 +1693,19 @@ BWTree<KeyType, ValueType, KeyComparator>::collectAllPageContents(
 template <typename KeyType, typename ValueType, typename KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::insert(const KeyType& key,
                                                        const ValueType& value) {
-  bool insert_success = false;
   m_foot_print += 4;
   if (m_unique_keys) {
     std::vector<ValueType> values = find(key);
     // There can only be one value corresponding to a key
     assert(values.size() <= 1);
-    if (values.size() > 0) return insert_success;
+    if (values.size() > 0) return false;
   }
 
-  do {
-    // First reach the leaf page where the key should be inserted
-    FindLeafResult r = findLeafPage(key);
+  // First reach the leaf page where the key should be inserted
+  FindLeafResult r = findLeafPage(key);
 
-    // Then install an insertion record
-    InstallDeltaResult result = installDeltaInsert(r.pid, r.node, key, value);
-    if (result == install_need_consolidate) {
-      insert_success = false;
-      // If consolidation fails then we know some other thread
-      // has performed consolidation for us and we just try again
-      performConsolidation(r);
-    } else if (result == install_try_again) {
-      // Don't need consolidate, but some other threads has
-      // changed the delta chain
-      insert_success = false;
-    } else if (result == install_success) {
-      // This branch should be the majority
-      insert_success = true;
-    } else {
-      assert(false);
-    }
-  } while (insert_success == false);
+  // Then install an insertion record
+  installDeltaInsert(r, key, value);
 
   return true;
 }
@@ -1745,30 +1719,15 @@ bool BWTree<KeyType, ValueType, KeyComparator>::insert(const KeyType& key,
 template <typename KeyType, typename ValueType, typename KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::erase(const KeyType& key,
                                                       const ValueType& value) {
-  bool delete_success = false;
   m_foot_print -= 4;
   std::vector<ValueType> values = find(key);
-  if (values.size() == 0) return delete_success;
+  if (values.size() == 0) return false;
 
-  do {
-    // First reach the leaf page where the key should be inserted
-    FindLeafResult r = findLeafPage(key);
+  // First reach the leaf page where the key should be inserted
+  FindLeafResult r = findLeafPage(key);
 
-    // Then install an insertion record
-    InstallDeltaResult result = installDeltaDelete(r.pid, r.node, key, value);
-    if (result == install_need_consolidate) {
-      delete_success = false;
-      // If consolidation fails then we know some other thread
-      // has performed consolidation for us and we just try again
-      performConsolidation(r);
-    } else if (result == install_try_again) {
-      delete_success = false;
-    } else if (result == install_success) {
-      delete_success = true;
-    } else {
-      assert(false);
-    }
-  } while (delete_success == false);
+  // Then install an insertion record
+  installDeltaDelete(r, key, value);
 
   return true;
 }
@@ -1887,7 +1846,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::consolidateModificationsInner(
 
 template <typename KeyType, typename ValueType, class KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
-    const FindLeafResult& leaf_info,
+    FindLeafResult& leaf_info,
     BWNode* original_node, std::vector<BWNode*>& garbage_nodes,
     std::vector<std::pair<KeyType, std::vector<ValueType>>>& data, PID& sibling,
     bool& has_merge, BWNode*& merge_node, KeyType& lower_bound,
@@ -1952,35 +1911,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
         new_sibling = split_node->split_sibling;
 
         // Try to install IndexTermDeltaInsert
-        if (!leaf_info.parent_pids.empty()) {
-        InstallDeltaResult status = install_try_again;
-        FindLeafResult temp = leaf_info;
-        while (status != install_success) {
-          status = installIndexTermDeltaInsert(temp.parent_pids.back(),
-                                               temp.parent_nodes.back(),
-                                               split_node);
-          if (status == install_need_consolidate) {
-            // We don't have to do this refind but it's easier than fixing
-            // up the FindLeafResult to point to the parent for now
-            PID temp_pid = temp.pid;
-            BWNode* temp_node = temp.node;
-            temp.pid = temp.parent_pids.back();
-            temp.node = temp.parent_nodes.back();
-            temp.parent_pids.pop_back();
-            temp.parent_nodes.pop_back();
-
-            performConsolidation(temp);
-
-            temp.parent_pids.push_back(temp.pid);
-            temp.parent_nodes.push_back(temp.node);
-            temp.pid = temp_pid;
-            temp.node = temp_node;
-          }
-
-          temp.parent_nodes.back() =
-            mapping_table[temp.parent_pids.back()].load();
-        }
-        }
+        installIndexTermDeltaInsert(leaf_info);
         break;
       }
       case deltaMerge: {
@@ -1995,34 +1926,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
 
         // Try to install IndexTermDeltaDelete
         if (!leaf_info.parent_pids.empty()) {
-        InstallDeltaResult status = install_try_again;
-        FindLeafResult temp = leaf_info;
-        while (status != install_success) {
-          status = installIndexTermDeltaDelete(temp.parent_pids.back(),
-                                               temp.parent_nodes.back(),
-                                               temp.pid,
-                                               merge_delta);
-          if (status == install_need_consolidate) {
-            // We don't have to do this refind but it's easier than fixing
-            // up the FindLeafResult to point to the parent for now
-            PID temp_pid = temp.pid;
-            BWNode* temp_node = temp.node;
-            temp.pid = temp.parent_pids.back();
-            temp.node = temp.parent_nodes.back();
-            temp.parent_pids.pop_back();
-            temp.parent_nodes.pop_back();
-
-            performConsolidation(temp);
-
-            temp.parent_pids.push_back(temp.pid);
-            temp.parent_nodes.push_back(temp.node);
-            temp.pid = temp_pid;
-            temp.node = temp_node;
-          }
-
-          temp.parent_nodes.back() =
-            mapping_table[temp.parent_pids.back()].load();
-        }
+          installIndexTermDeltaDelete(leaf_info);
         }
         break;
       }
@@ -2058,7 +1962,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateLeaf(
 
 template <typename KeyType, typename ValueType, class KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(
-    const FindLeafResult& leaf_info) {
+    FindLeafResult& leaf_info) {
   // Keep track of nodes so we can garbage collect later
   BWNode* original_node = leaf_info.node;
 
@@ -2089,18 +1993,27 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(
 
   size_t data_size = data.size();
   bwt_printf("Consolidated data size: %lu\n", data_size);
-  assert(key_lessequal(lower_bound, upper_bound));
-  assert(key_lessequal(lower_bound, data.begin()->first));
-  idb_assert(key_greater(upper_bound, (data.begin() + (data_size - 1))->first));
-  
+  if (data_size > 0) {
+    assert(key_lessequal(lower_bound, upper_bound));
+    assert(key_lessequal(lower_bound, data.begin()->first));
+    idb_assert(key_greater(upper_bound,
+                           (data.begin() + (data_size - 1))->first));
+  }
+
   if (LEAF_NODE_SIZE_MAX < data_size) {
     bwt_printf("Data size greater than threshold, splitting...\n");
     // Find separator key by grabbing middle element
-    auto middle_it = data.begin() + data_size / 2;
+    //auto middle_it = data.begin() + data_size / 2;
+    using LessFnT = LessFn<KeyType, std::vector<ValueType>, KeyComparator>;
+    LessFnT less_fn(m_key_less);
+    auto middle_it = std::lower_bound(
+      data.begin(), data.end(),
+      *(data.begin() + data_size / 2), less_fn);
     KeyType separator_key = middle_it->first;
     // Place second half in other node
     BWLeafNode* upper_leaf_node =
         new BWLeafNode(separator_key, upper_bound, sibling);
+    assert(upper_leaf_node != nullptr);
     upper_leaf_node->data.insert(upper_leaf_node->data.end(), middle_it,
                                  data.end());
     // Install second node
@@ -2108,16 +2021,19 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(
     // Place first half in one node
     BWLeafNode* lower_leaf_node =
         new BWLeafNode(lower_bound, separator_key, new_split_pid);
+    assert(lower_leaf_node != nullptr);
     lower_leaf_node->data.insert(lower_leaf_node->data.end(), data.begin(),
                                  middle_it);
     // Create split record
     idb_assert(key_lessequal(separator_key, upper_bound));
     BWDeltaSplitNode* split_node = new BWDeltaSplitNode(
         lower_leaf_node, separator_key, new_split_pid, upper_bound);
+    assert(split_node != nullptr);
     swap_node = split_node;
   } else {
     BWLeafNode* consolidated_node =
         new BWLeafNode(lower_bound, upper_bound, sibling);
+    assert(consolidated_node != nullptr);
     consolidated_node->data.swap(data);
 
     if (data_size < LEAF_NODE_SIZE_MIN &&
@@ -2127,6 +2043,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(
       bwt_printf("Data size less than threshold, placing remove node...\n");
       // Install a remove delta on top of the node
       BWDeltaRemoveNode* remove_node = new BWDeltaRemoveNode(consolidated_node);
+      assert(remove_node != nullptr);
       swap_node = remove_node;
     } else {
       swap_node = consolidated_node;
@@ -2137,9 +2054,16 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(
       original_node, swap_node);
   if (result) {
     // Succeeded, request garbage collection of processed nodes
+    leaf_info.node = swap_node;
     addGarbageNodes(garbage_nodes);
   } else {
     // Failed, cleanup
+    leaf_info.node = mapping_table[leaf_info.pid].load();
+    if (swap_node->type == deltaRemove) {
+      BWDeltaRemoveNode* node = static_cast<BWDeltaRemoveNode*>(swap_node);
+      swap_node = node->child_node;
+      delete node;
+    }
     deleteDeltaChain(swap_node);
   }
   return result;
@@ -2147,7 +2071,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateLeafNode(
 
 template <typename KeyType, typename ValueType, class KeyComparator>
 void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
-    const FindLeafResult& leaf_info,
+    FindLeafResult& leaf_info,
     BWNode* original_node, std::vector<BWNode*>& garbage_nodes,
     std::vector<std::pair<KeyType, PID>>& separators, bool& has_merge,
     BWNode*& merge_node, KeyType& lower_bound, KeyType& upper_bound) {
@@ -2210,37 +2134,13 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
         has_split = true;
         split_separator_key = split_node->separator_key;
 
-
         // Try to install IndexTermDeltaInsert
-        if (!leaf_info.parent_pids.empty()) {
-          InstallDeltaResult status = install_try_again;
-          FindLeafResult temp = leaf_info;
-          while (status != install_success) {
-            status = installIndexTermDeltaInsert(temp.parent_pids.back(),
-                                                 temp.parent_nodes.back(),
-                                                 split_node);
-            if (status == install_need_consolidate) {
-              // We don't have to do this refind but it's easier than fixing
-              // up the FindLeafResult to point to the parent for now
-              PID temp_pid = temp.pid;
-              BWNode* temp_node = temp.node;
-              temp.pid = temp.parent_pids.back();
-              temp.node = temp.parent_nodes.back();
-              temp.parent_pids.pop_back();
-              temp.parent_nodes.pop_back();
-
-              performConsolidation(temp);
-
-              temp.parent_pids.push_back(temp.pid);
-              temp.parent_nodes.push_back(temp.node);
-              temp.pid = temp_pid;
-              temp.node = temp_node;
-            }
-
-            temp.parent_nodes.back() =
-              mapping_table[temp.parent_pids.back()].load();
-          }
-        }
+        bwt_printf("Before install index insert in consolidateInner, "
+                   "pid %lu, sibling %lu, parents %lu\n",
+                   leaf_info.pid, split_node->split_sibling,
+                   leaf_info.parent_pids.size());
+        //idb_assert(leaf_info.pid != m_root.load());
+        installIndexTermDeltaInsert(leaf_info);
         break;
       }
       case deltaMerge: {
@@ -2252,37 +2152,8 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
         merge_separator_key = merge_delta->separator_key;
         merge_node = merge_delta->merge_node;
 
-        if (!leaf_info.parent_pids.empty()) {
-        InstallDeltaResult status = install_try_again;
-        FindLeafResult temp = leaf_info;
-        while (status != install_success) {
-          status = installIndexTermDeltaDelete(temp.parent_pids.back(),
-                                               temp.parent_nodes.back(),
-                                               temp.pid,
-                                               merge_delta);
-          if (status == install_need_consolidate) {
-            // We don't have to do this refind but it's easier than fixing
-            // up the FindLeafResult to point to the parent for now
-            PID temp_pid = temp.pid;
-            BWNode* temp_node = temp.node;
-            temp.pid = temp.parent_pids.back();
-            temp.node = temp.parent_nodes.back();
-            temp.parent_pids.pop_back();
-            temp.parent_nodes.pop_back();
-
-            performConsolidation(temp);
-
-            temp.parent_pids.push_back(temp.pid);
-            temp.parent_nodes.push_back(temp.node);
-            temp.pid = temp_pid;
-            temp.node = temp_node;
-          }
-
-          temp.parent_nodes.back() =
-            mapping_table[temp.parent_pids.back()].load();
-        }
-        }
-        
+        idb_assert(!leaf_info.parent_pids.empty());
+        installIndexTermDeltaDelete(leaf_info);
         break;
       }
       default:
@@ -2313,7 +2184,7 @@ void BWTree<KeyType, ValueType, KeyComparator>::traverseAndConsolidateInner(
 
 template <typename KeyType, typename ValueType, class KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(
-    const FindLeafResult& leaf_info) {
+    FindLeafResult& leaf_info) {
   BWNode* original_node = leaf_info.node;
 
   // Keep track of nodes so we can garbage collect later
@@ -2343,10 +2214,12 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(
   bool did_split = false;
   size_t data_size = separators.size();
   bwt_printf("Consolidated data size: %lu\n", data_size);
-  assert(key_lessequal(lower_bound, upper_bound));
-  idb_assert(key_lessequal(lower_bound, separators.begin()->first));
-  idb_assert(key_greater(upper_bound,
-                         (separators.begin() + (data_size - 1))->first));
+  if (data_size > 0) {
+    assert(key_lessequal(lower_bound, upper_bound));
+    idb_assert(key_lessequal(lower_bound, separators.begin()->first));
+    idb_assert(key_greater(upper_bound,
+                           (separators.begin() + (data_size - 1))->first));
+  }
 
   bool result;
   if (leaf_info.parent_nodes.empty() && data_size == 1) {
@@ -2355,7 +2228,9 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(
     bwt_printf("Attempting to replace root with child...\n");
     PID leaf_pid = leaf_info.pid;
     PID child_pid = separators[0].second;
+    idb_assert(false);
     result = m_root.compare_exchange_strong(leaf_pid, child_pid);
+    idb_assert(false);
     if (result) {
       bwt_printf("Replaced root with prev root child successfully\n");
       addGarbageNodes(garbage_nodes);
@@ -2366,16 +2241,23 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(
     if (INNER_NODE_SIZE_MAX < data_size) {
       bwt_printf("Data size greater than threshold, splitting...\n");
       // Find separator key by grabbing middle element
-      auto middle_it = separators.begin() + (data_size / 2);
+      //auto middle_it = separators.begin() + (data_size / 2);
+      using LessFnT = LessFn<KeyType, PID, KeyComparator>;
+      LessFnT less_fn(m_key_less);
+      auto middle_it = std::lower_bound(
+        separators.begin(), separators.end(),
+        *(separators.begin() + data_size / 2), less_fn);
       KeyType separator_key = middle_it->first;
       // Place first half in one node
       BWInnerNode* lower_inner_node =
           new BWInnerNode(lower_bound, separator_key);
+      assert(lower_inner_node != nullptr);
       lower_inner_node->separators.insert(lower_inner_node->separators.end(),
                                           separators.begin(), middle_it);
       // Place second half in other node
       BWInnerNode* upper_inner_node =
           new BWInnerNode(separator_key, upper_bound);
+      assert(upper_inner_node != nullptr);
       upper_inner_node->separators.insert(upper_inner_node->separators.end(),
                                           middle_it, separators.end());
       // Install second node
@@ -2384,12 +2266,14 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(
       idb_assert(key_lessequal(separator_key, upper_bound));
       BWDeltaSplitNode* split_node = new BWDeltaSplitNode(
           lower_inner_node, separator_key, new_split_pid, upper_bound);
+      assert(split_node != nullptr);
       swap_node = split_node;
       did_split = true;
     } else {
       BWInnerNode* consolidated_node =
           new BWInnerNode(lower_bound, upper_bound);
       consolidated_node->separators.swap(separators);
+      assert(consolidated_node != nullptr);
 
       if (data_size < INNER_NODE_SIZE_MIN &&
           // Never remove root
@@ -2401,6 +2285,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(
         // Install a remove delta on top of the node
         BWDeltaRemoveNode* remove_node =
             new BWDeltaRemoveNode(consolidated_node);
+        assert(remove_node != nullptr);
         swap_node = remove_node;
       } else {
         swap_node = consolidated_node;
@@ -2408,7 +2293,6 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(
     }
 
     // printf("before cex inner\n");
-    // idb_assert(false);
     result = mapping_table[leaf_info.pid].compare_exchange_strong(original_node,
                                                                   swap_node);
     // printf("after cex inner\n");
@@ -2416,11 +2300,19 @@ bool BWTree<KeyType, ValueType, KeyComparator>::consolidateInnerNode(
 
     if (result) {
       // Succeeded, request garbage collection of processed nodes
+      leaf_info.node = swap_node;
       addGarbageNodes(garbage_nodes);
     } else {
+      leaf_info.node = mapping_table[leaf_info.pid].load();
+
       if (did_split) {
       }
       // Failed, cleanup
+      if (swap_node->type == deltaRemove) {
+        BWDeltaRemoveNode* node = static_cast<BWDeltaRemoveNode*>(swap_node);
+        swap_node = node->child_node;
+        delete node;
+      }
       deleteDeltaChain(swap_node);
     }
   }
@@ -2511,7 +2403,7 @@ bool BWTree<KeyType, ValueType, KeyComparator>::isLeaf(BWNode* node) {
 
 template <typename KeyType, typename ValueType, class KeyComparator>
 bool BWTree<KeyType, ValueType, KeyComparator>::performConsolidation(
-    const FindLeafResult& leaf_info) {
+    FindLeafResult& leaf_info) {
   // Figure out if this is a leaf or inner node
   bool is_leaf = isLeaf(leaf_info.node);
   if (is_leaf) {
@@ -2522,107 +2414,71 @@ bool BWTree<KeyType, ValueType, KeyComparator>::performConsolidation(
 }
 
 template <typename KeyType, typename ValueType, typename KeyComparator>
-typename BWTree<KeyType, ValueType, KeyComparator>::PID
-BWTree<KeyType, ValueType, KeyComparator>::searchAndInstallMerge(
-    const FindLeafResult& leaf_info) {
-  KeyType s_upper_bound;
-  KeyType node_upper_bound;
-  std::tie(s_upper_bound, node_upper_bound) = findBounds(leaf_info.node);
-
-  BWNode* c_node = leaf_info.parent_nodes.back();
-  PID s_pid = NONE_PID;
-  while (c_node != nullptr) {
-    switch (c_node->type) {
-      case PageType::deltaMerge: {
-        BWDeltaMergeNode* merge_delta = static_cast<BWDeltaMergeNode*>(c_node);
-        if (key_greater(s_upper_bound, merge_delta->separator_key)) {
-          c_node = merge_delta->merge_node;
-        } else {
-          c_node = merge_delta->child_node;
-        }
-        break;
-      }
-      case PageType::deltaSplit: {
-        BWDeltaSplitNode* split_delta = static_cast<BWDeltaSplitNode*>(c_node);
-        // Should be to the left, so never need to go right
-        assert(!key_greater(s_upper_bound, split_delta->separator_key));
-        c_node = split_delta->child_node;
-        break;
-      }
-      case PageType::deltaIndexTermInsert: {
-        BWDeltaIndexTermInsertNode* insert_delta =
-            static_cast<BWDeltaIndexTermInsertNode*>(c_node);
-        if (key_equal(s_upper_bound, insert_delta->next_separator_key)) {
-          s_pid = insert_delta->new_split_sibling;
-          c_node = nullptr;
-        } else {
-          c_node = insert_delta->child_node;
-        }
-        break;
-      }
-      case PageType::deltaIndexTermDelete: {
-        BWDeltaIndexTermDeleteNode* delete_delta =
-            static_cast<BWDeltaIndexTermDeleteNode*>(c_node);
-        if (key_equal(s_upper_bound, delete_delta->remove_node_low_key)) {
-          // Delete is already installed, means merge was installed
-          return install_success;
-        } else if (key_equal(s_upper_bound, delete_delta->next_separator_key)) {
-          // Merge into node that was just merged into
-          s_pid = delete_delta->node_to_merge_into;
-          c_node = nullptr;
-        } else {
-          c_node = delete_delta->child_node;
-        }
-        break;
-      }
-      case PageType::inner: {
-        BWInnerNode* inner_node = static_cast<BWInnerNode*>(c_node);
-
-        s_pid = inner_node->separators.back().second;
-        for (int i = 1; i < inner_node->separators.size(); i++) {
-          bwt_printf("Inside for loop, i = %d\n", i);
-          if (key_lessequal(s_upper_bound, inner_node->separators[i].first)) {
-            s_pid = inner_node->separators[i - 1].second;
-            break;
-          }
-        }
-        c_node = nullptr;
-        break;
-      }
-      default:
-        assert(false);
-    }
-  }
-  bwt_printf("s_pid %lu\n", s_pid);
-  idb_assert(s_pid != NONE_PID);
-  idb_assert(s_pid != leaf_info.pid);
-  BWNode* sibling_node = mapping_table[s_pid].load();
-
-  InstallDeltaResult status = install_try_again;
-  while (status != install_success) {
-    status = installDeltaMerge(s_pid, sibling_node, leaf_info.pid,
-                               s_upper_bound, leaf_info.node, node_upper_bound);
-    if (status == install_need_consolidate) {
-      bwt_printf(
-          "Trying to install merge but needs consolidate, "
-          "performing...\n");
-      // Need to perform a findLeafPage to ensure the SMO is serialized before
-      // consolidating
-      FindLeafResult sibling_result =
-          findLeafPage(findBounds(sibling_node).first);
-      sibling_result.pid = s_pid;
-      sibling_result.node = sibling_node;
-      performConsolidation(sibling_result);
-    } else if (status == install_node_invalid) {
-      assert(false);
+bool BWTree<KeyType, ValueType, KeyComparator>::fixSMO(
+    FindLeafResult& owner, bool& isSMO) {
+  isSMO = true;
+  switch (owner.node->type) {
+    case PageType::deltaSplit: {
+      bwt_printf("Before install index insert in fixSMO\n");
+      installIndexTermDeltaInsert(owner);
       break;
     }
-    // Either success or try again, either way need to reload pid
-    // Maybe we need to restar the whole process at this point?
-    sibling_node = mapping_table[s_pid].load();
+    case PageType::deltaMerge: {
+      installIndexTermDeltaDelete(owner);
+      break;
+    }
+    case PageType::deltaRemove: {
+      installDeltaMerge(owner);
+      return true;
+      break;
+    }
+    default:
+      isSMO = false;
+      return false;
   }
+  return false;
+}
 
-  return s_pid;
+template <typename KeyType, typename ValueType, typename KeyComparator>
+void BWTree<KeyType, ValueType, KeyComparator>::fixSMOForInstall(
+    FindLeafResult& leaf_info) {
+  FindLeafResult info = leaf_info;
+  bool isSMO;
+  bwt_printf("Entering fixSMOForInstall with pid %lu\n",
+             leaf_info.pid);
+  while (true) {
+    bwt_printf("first fixSMO\n");
+    while (fixSMO(info, isSMO)) {
+      bwt_printf("Looping on fixSMO\n");
+      info.node = mapping_table[info.pid].load();
+    }
+    if (isSMO) {
+      bwt_printf("Consolidating after fixSMO loop\n");
+      performConsolidation(info);
+    } else {
+      break;
+    }
+    info.node = mapping_table[info.pid].load();
+  }
+  bwt_printf("Exiting fixSMOForInstall with pid %lu to pid %lu\n",
+             leaf_info.pid, info.pid);
+  leaf_info = info;
+}
+
+template <typename KeyType, typename ValueType, class KeyComparator>
+typename BWTree<KeyType, ValueType, KeyComparator>::FindLeafResult
+BWTree<KeyType, ValueType, KeyComparator>::findPID(PID pid) {
+  BWNode* node = mapping_table[pid].load();
+  auto bounds = findBounds(node);
+  FindLeafResult result = findLeafPage(bounds.first);
+  while (!result.parent_pids.empty()) {
+    if (result.pid == pid) {
+      break;
+    } 
+    result.pop();
+  }
+  idb_assert(result.pid == pid);
+  return result;
 }
 
 // Returns the first page where the key can reside
@@ -2657,6 +2513,11 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
   curr_pid = m_root.load();
   curr_pid_root_node = mapping_table[curr_pid].load();
   BWNode* curr_node = curr_pid_root_node;
+
+  assert(key_equal(findBounds(curr_node).first, KeyType::NEG_INF_KEY));
+  if (curr_node->type != PageType::deltaSplit) {
+    assert(key_equal(findBounds(curr_node).second, KeyType::POS_INF_KEY));
+  }
 
   PID parent_pid = NONE_PID;
   BWNode* parent_pid_root_node = nullptr;
@@ -2803,14 +2664,13 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
           bwt_printf("key_le = %d\n", le);
           bwt_printf("(lower == upper) = %d\n",
                      key_equal(lower_bound, upper_bound));
-
+#endif
 #ifdef INTERACTIVE_DEBUG
           idb.pid_list.push_back(curr_pid);
           idb_assert_key(key, geq && (key_equal(lower_bound, upper_bound) || le));
           idb.pid_list.pop_back();
 #endif
 
-#endif
           still_searching = false;
         }
         break;
@@ -2821,7 +2681,7 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
         bwt_printf("Traversing split node\n");
         // Our invariant is that there should be no delta chains on top of a
         // split node
-        assert(chain_length == 1);
+        idb_assert(chain_length == 1);
         BWDeltaSplitNode* split_delta =
             static_cast<BWDeltaSplitNode*>(curr_node);
 
@@ -2839,11 +2699,11 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
 
         // Must handle the case where the parent_pid is NONE_PID
         // Attempt to create a new inner node
-        InstallDeltaResult status = install_try_again;
         if (parent_pid == NONE_PID) {
           // Create new root inner ndoe
           BWInnerNode* new_root =
-              new BWInnerNode(KeyType::NEG_INF_KEY, KeyType::POS_INF_KEY);
+            new BWInnerNode(KeyType::NEG_INF_KEY, KeyType::POS_INF_KEY);
+          assert(new_root != nullptr);
           // Add current root as child and new split sibling
           new_root->separators.emplace_back(KeyType::NEG_INF_KEY, curr_pid);
           new_root->separators.emplace_back(split_delta->separator_key,
@@ -2851,7 +2711,21 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
           // Install the new root
           PID new_root_pid = installPage(new_root);
           // Try to install the root
-          bool result = m_root.compare_exchange_strong(curr_pid, new_root_pid);
+          bwt_printf("Before cex root in findLeaf\n");
+          bool result = (curr_node == mapping_table[curr_pid].load());
+          // idb.pid_list.clear();
+          // idb.pid_list.push_back(curr_pid);
+          // idb.pid_list.push_back(new_root_pid);
+          // idb.pid_list.push_back(m_root.load());
+          // idb_assert(0 == 1);
+          result =
+            m_root.compare_exchange_strong(curr_pid, new_root_pid);
+          // idb.pid_list.clear();
+          // idb.pid_list.push_back(curr_pid);
+          // idb.pid_list.push_back(new_root_pid);
+          // idb.pid_list.push_back(m_root.load());
+          // idb_assert(0 == 2);
+
           if (result) {
             bwt_printf("Replaced new root successfully with PID %lu.\n",
                        new_root_pid);
@@ -2867,52 +2741,16 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
             // Should cleanup the root page but for now this will be cleaned
             // up in the destructor
             bwt_printf("Compare exchange with root failed, restarting...");
-            status = install_node_invalid;
-            request_restart_top = true;
           }
+          request_restart_top = true;
         }
-        if (status != install_node_invalid) {
-          if (!key_greaterequal(key, split_delta->separator_key)) {
-            status = install_success;
-          }
-          while (status != install_success) {
-            status = installIndexTermDeltaInsert(
-              parent_pid, parent_pid_root_node, split_delta);
-            if (status == install_need_consolidate) {
-              bwt_printf(
-                "Split index parent needs consolidation, "
-                "performing...\n");
-              // We don't have to do this refind but it's easier than fixing
-              // up the FindLeafResult to point to the parent for now
-              PID temp_pid = leaf_info.pid;
-              BWNode* temp_node = leaf_info.node;
-              leaf_info.pid = parent_pid;
-              leaf_info.node = parent_pid_root_node;
-              leaf_info.parent_pids.pop_back();
-              leaf_info.parent_nodes.pop_back();
-
-              performConsolidation(leaf_info);
-
-              leaf_info.parent_pids.push_back(parent_pid);
-              leaf_info.parent_nodes.push_back(parent_pid_root_node);
-              leaf_info.pid = temp_pid;
-              leaf_info.node = temp_node;
-            } else if (status == install_node_invalid) {
-              bwt_printf("Split index parent invalid, restarting search...\n");
-              // Restart from the top
-              request_restart_top = true;
-              break;
-            }
-            // Either success or try again, either way need to reload pid
-            // Maybe we need to restar the whole process at this point?
-            parent_pid_root_node = mapping_table[parent_pid].load();
-          }
-        }
-
-        if (status == install_success) {
-          bwt_printf("Split index parent install insert success\n");
+        if (!request_restart_top) {
           if (key_greaterequal(key, split_delta->separator_key)) {
-            idb_assert_key(key, key_less(key, split_delta->next_separator_key));
+            //idb_assert_key(key, key_less(key, split_delta->next_separator_key));
+            // Add index term delta insert
+            bwt_printf("Before install index insert in findLeaf\n");
+            installIndexTermDeltaInsert(leaf_info);
+            bwt_printf("Split index parent install insert success\n");
             request_traverse_split = true;
             child_pid = split_delta->split_sibling;
           } else {
@@ -2920,18 +2758,19 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
           }
         }
         break;
-      }
-      ////////////////////////////////////////////////////////////////////////////
+    }
+    ////////////////////////////////////////////////////////////////////////////
       /// Remove
       case PageType::deltaRemove: {
         bwt_printf("Traversing remove node\n");
         // Note: should not trigger a remove on the left most leaf even if
         // the
         // number of tuples is below a threshold
-        PID sibling_pid = searchAndInstallMerge(leaf_info);
+        idb_assert(chain_length == 1);
+        installDeltaMerge(leaf_info);
 
         request_traverse_split = true;
-        child_pid = sibling_pid;
+        child_pid = leaf_info.pid;
         break;
       }
       ////////////////////////////////////////////////////////////////////////////
@@ -2940,7 +2779,7 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
         bwt_printf("Traversing merge node\n");
         // Our invariant is that there should be no delta chains on top of a
         // merge node
-        assert(chain_length == 1);
+        idb_assert(chain_length == 1);
         BWDeltaMergeNode* merge_delta =
             static_cast<BWDeltaMergeNode*>(curr_node);
 
@@ -2956,34 +2795,7 @@ BWTree<KeyType, ValueType, KeyComparator>::findLeafPage(const KeyType& key) {
         //    install_node_invalid
         //    which triggers a search from the root.
 
-        InstallDeltaResult status = install_try_again;
-        while (status != install_success) {
-          status = installIndexTermDeltaDelete(parent_pid, parent_pid_root_node,
-                                               curr_pid, merge_delta);
-          if (status == install_need_consolidate) {
-            // We don't have to do this refind but it's easier than fixing
-            // up the FindLeafResult to point to the parent for now
-            PID temp_pid = leaf_info.pid;
-            BWNode* temp_node = leaf_info.node;
-            leaf_info.pid = parent_pid;
-            leaf_info.node = parent_pid_root_node;
-            leaf_info.parent_pids.pop_back();
-            leaf_info.parent_nodes.pop_back();
-
-            performConsolidation(leaf_info);
-
-            leaf_info.parent_pids.push_back(parent_pid);
-            leaf_info.parent_nodes.push_back(parent_pid_root_node);
-            leaf_info.pid = temp_pid;
-            leaf_info.node = temp_node;
-          } else if (status == install_node_invalid) {
-            // Restart from the top
-            assert(false);
-            request_restart_top = true;
-            break;
-          }
-          parent_pid_root_node = mapping_table[parent_pid].load();
-        }
+        installIndexTermDeltaDelete(leaf_info);
 
         if (key_greaterequal(key, merge_delta->separator_key)) {
           curr_node = merge_delta->merge_node;
@@ -3059,94 +2871,178 @@ BWTree<KeyType, ValueType, KeyComparator>::installPage(BWNode* new_node_p) {
 }
 
 template <typename KeyType, typename ValueType, typename KeyComparator>
-typename BWTree<KeyType, ValueType, KeyComparator>::InstallDeltaResult
-BWTree<KeyType, ValueType, KeyComparator>::installDeltaInsert(
-    PID leaf_pid, BWNode* node, const KeyType& key, const ValueType& value) {
-  bool cas_success;
+typename BWTree<KeyType, ValueType, KeyComparator>::PID
+BWTree<KeyType, ValueType, KeyComparator>::findNext(BWNode* node) {
+  PID next = NONE_PID;
+  while (node != nullptr) {
+    switch (node->type) {
+    case leaf: {
+      next = static_cast<BWLeafNode*>(node)->next;
+      node = nullptr;
+      break;
+    }
+    default: {
+      node = static_cast<BWDeltaNode*>(node)->child_node;
+    }
+    }
+  }
+  assert(next != NONE_PID);
+  return next;
+}
+
+template <typename KeyType, typename ValueType, typename KeyComparator>
+void BWTree<KeyType, ValueType, KeyComparator>::installDeltaInsert(
+    const FindLeafResult& leaf_info, const KeyType& key,
+    const ValueType& value) {
   auto ins_record = std::pair<KeyType, ValueType>(key, value);
 
-  BWNode* old_leaf_p = node;
+  FindLeafResult info = leaf_info;
+  while (true) {
+    fixSMOForInstall(info);
 
-  if (isSMO(old_leaf_p)) {
-    return install_need_consolidate;
-  }
+    // Leaf might have split, check if we are still in bounds
+    if (key_greaterequal(key, findBounds(info.node).second)) {
+      info.pid = findNext(info.node);
+      idb_assert(info.pid != NONE_PID);
+      info.node = mapping_table[info.pid].load();
+      continue;
+    }
 
-  BWNode* new_leaf_p = (BWNode*)new BWDeltaInsertNode(old_leaf_p, ins_record);
+    BWNode* old_leaf_p = info.node;
+
+    BWNode* new_leaf_p = (BWNode*)new BWDeltaInsertNode(old_leaf_p, ins_record);
+    assert(new_leaf_p != nullptr);
 
   // Either the page has been consolidated, in which case we try again,
   // or the page has been appended another record, in which case we also
-  // try again
-  cas_success =
-      mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p, new_leaf_p);
-  if (cas_success == false) {
-    delete new_leaf_p;
-    return install_try_again;
+  // try agaijn
+    if (mapping_table[info.pid].compare_exchange_strong(old_leaf_p,
+                                                        new_leaf_p)) {
+      return;
+    } else {
+      delete new_leaf_p;
+      info.node = mapping_table[info.pid].load();
+    }
   }
-
-  return install_success;
 }
 
 template <typename KeyType, typename ValueType, typename KeyComparator>
-typename BWTree<KeyType, ValueType, KeyComparator>::InstallDeltaResult
-BWTree<KeyType, ValueType, KeyComparator>::installDeltaDelete(
-    PID leaf_pid, BWNode* node, const KeyType& key, const ValueType& value) {
-  bool cas_success;
+void BWTree<KeyType, ValueType, KeyComparator>::installDeltaDelete(
+    const FindLeafResult& leaf_info, const KeyType& key,
+    const ValueType& value) {
   auto delete_record = std::pair<KeyType, ValueType>(key, value);
 
-  BWNode* old_leaf_p = node;
+  FindLeafResult info = leaf_info;
+  while (true) {
+    fixSMOForInstall(info);
 
-  if (isSMO(old_leaf_p)) {
-    return install_need_consolidate;
-  }
+    // Leaf might have split, check if we are still in bounds
+    if (key_greaterequal(key, findBounds(info.node).second)) {
+      info.pid = findNext(info.node);
+      idb_assert(info.pid != NONE_PID);
+      info.node = mapping_table[info.pid].load();
+      continue;
+    }
 
-  BWNode* new_leaf_p =
+    BWNode* old_leaf_p = info.node;
+
+    BWNode* new_leaf_p =
       (BWNode*)new BWDeltaDeleteNode(old_leaf_p, delete_record);
+    assert(new_leaf_p != nullptr);
 
-  cas_success =
-      mapping_table[leaf_pid].compare_exchange_strong(old_leaf_p, new_leaf_p);
-  if (cas_success == false) {
-    delete new_leaf_p;
-    return install_try_again;
+  // Either the page has been consolidated, in which case we try again,
+  // or the page has been appended another record, in which case we also
+  // try agaijn
+    if (mapping_table[info.pid].compare_exchange_strong(old_leaf_p,
+                                                        new_leaf_p)) {
+      return;
+    } else {
+      delete new_leaf_p;
+      info.node = mapping_table[info.pid].load();
+    }
   }
-
-  return install_success;
 }
 
 template <typename KeyType, typename ValueType, typename KeyComparator>
-typename BWTree<KeyType, ValueType, KeyComparator>::InstallDeltaResult
-BWTree<KeyType, ValueType, KeyComparator>::installIndexTermDeltaInsert(
-    PID node, BWNode* inner_node, const BWDeltaSplitNode* split_node) {
-  BWNode* old_inner_p = inner_node;
+void BWTree<KeyType, ValueType, KeyComparator>::installIndexTermDeltaInsert(
+    FindLeafResult& leaf_info) {
+  BWDeltaSplitNode* split_node =
+    dynamic_cast<BWDeltaSplitNode*>(leaf_info.node);
+  assert(split_node != nullptr);
 
-  if (isSMO(old_inner_p)) {
-    return install_need_consolidate;
+  if (leaf_info.parent_pids.empty()) {
+    // Create new root inner ndoe
+    BWInnerNode* new_root =
+      new BWInnerNode(KeyType::NEG_INF_KEY, KeyType::POS_INF_KEY);
+    assert(new_root != nullptr);
+    // Add current root as child and new split sibling
+    new_root->separators.emplace_back(KeyType::NEG_INF_KEY, leaf_info.pid);
+    new_root->separators.emplace_back(split_node->separator_key,
+                                      split_node->split_sibling);
+    // Install the new root
+    PID new_root_pid = installPage(new_root);
+    // Try to install the root
+    // idb.pid_list.clear();
+    // idb.pid_list.push_back(leaf_info.pid);
+    // idb.pid_list.push_back(new_root_pid);
+    // idb.pid_list.push_back(m_root.load());
+    // idb_assert(0 == 1);
+    bool result = m_root.compare_exchange_strong(leaf_info.pid, new_root_pid);
+    // idb.pid_list.clear();
+    // idb.pid_list.push_back(leaf_info.pid);
+    // idb.pid_list.push_back(new_root_pid);
+    // idb.pid_list.push_back(m_root.load());
+    // idb_assert(0 == 2);
+    if (result) {
+      bwt_printf("Replaced new root successfully with PID %lu.\n",
+                 new_root_pid);
+
+      leaf_info.parent_pids.clear();
+      leaf_info.parent_nodes.clear();
+      leaf_info.parent_pids.push_back(new_root_pid);
+      leaf_info.parent_nodes.push_back(new_root);
+      //idb_assert(false);
+    } else {
+      // Should cleanup the root page but for now this will be cleaned
+      // up in the destructor
+      bwt_printf("Compare exchange with root failed, someone else did it...\n");
+      leaf_info = findPID(leaf_info.pid);
+    }
+    return;
   }
+  assert(!leaf_info.parent_pids.empty());
+  FindLeafResult parent_info = leaf_info;
+  parent_info.pop();
 
-  KeyType new_separator_key = split_node->separator_key;
-  PID split_sibling = split_node->split_sibling;
-  KeyType next_separator_key = split_node->next_separator_key;
+  while (true) {
+    fixSMOForInstall(parent_info);
 
-  // Check if already installed
-  BWNode* c_node = old_inner_p;
-  while (c_node != nullptr) {
-    switch (c_node->type) {
+    PID install_pid = parent_info.pid;
+    BWNode* old_inner_p = parent_info.node;
+
+    KeyType new_separator_key = split_node->separator_key;
+    PID split_sibling = split_node->split_sibling;
+    KeyType next_separator_key = split_node->next_separator_key;
+
+    // Check if already installed
+    BWNode* c_node = old_inner_p;
+    while (c_node != nullptr) {
+      switch (c_node->type) {
       case deltaIndexTermInsert: {
         BWDeltaIndexTermInsertNode* insert_node =
-            static_cast<BWDeltaIndexTermInsertNode*>(c_node);
+          static_cast<BWDeltaIndexTermInsertNode*>(c_node);
         if (insert_node->new_split_sibling == split_sibling) {
-            return install_success;
+          return;
         }
         c_node = insert_node->child_node;
         break;
       }
       case inner: {
-        // Same as split, invariant is that merge nodes always force a
-        // consolidate, so should be at the top
         BWInnerNode* inner_node = static_cast<BWInnerNode*>(c_node);
         for (int i = 0; i < inner_node->separators.size(); i++) {
           bwt_printf("Inside for loop, i = %d\n", i);
           if (inner_node->separators[i].second == split_sibling) {
-            return install_success;
+            return;
           }
         }
         c_node = nullptr;
@@ -3156,65 +3052,71 @@ BWTree<KeyType, ValueType, KeyComparator>::installIndexTermDeltaInsert(
         BWDeltaNode* delta = static_cast<BWDeltaNode*>(c_node);
         c_node = delta->child_node;
       }
+      }
+    }
+    auto nb = findBounds(old_inner_p);
+  
+    if (key_greaterequal(new_separator_key, nb.second)) {
+      // This means that the split sibling was already cut off into
+      // another adjacent sibling of the parent inner node
+      return;
+    }
+  
+
+    auto b = findBounds(split_node);
+    idb_assert(key_equal(b.second, new_separator_key));
+    auto b2 = findBounds(mapping_table[split_sibling].load());
+    idb_assert(key_equal(b2.first, new_separator_key));
+    //idb_assert(key_equal(b2.second, next_separator_key));
+
+    idb_assert(key_lessequal(new_separator_key, next_separator_key));
+    BWNode* new_inner_p = (BWNode*)new BWDeltaIndexTermInsertNode(
+      old_inner_p, new_separator_key, split_sibling, next_separator_key);
+    assert(new_inner_p != nullptr);
+
+    if (mapping_table[install_pid].compare_exchange_strong(old_inner_p,
+                                                           new_inner_p)) {
+      parent_info.node = new_inner_p;
+      parent_info.push(leaf_info.pid, leaf_info.node);
+      leaf_info = parent_info;
+      return;
+    } else {
+      parent_info.node = mapping_table[parent_info.pid].load();
+      delete new_inner_p;
     }
   }
-  auto nb = findBounds(inner_node);
-  
-  if (key_greaterequal(new_separator_key, nb.second)) {
-    // This means that the split sibling was already cut off into
-    // another adjacent sibling of the parent inner node
-    return install_success;
-  }
-  
-
-#ifdef BWTREE_DEBUG
-  auto b = findBounds(split_node);
-  idb_assert(key_equal(b.second, new_separator_key));
-  auto b2 = findBounds(mapping_table[split_sibling].load());
-  idb_assert(key_equal(b2.first, new_separator_key));
-  //idb_assert(key_equal(b2.second, next_separator_key));
-#endif
-
-  idb_assert(key_lessequal(new_separator_key, next_separator_key));
-  BWNode* new_inner_p = (BWNode*)new BWDeltaIndexTermInsertNode(
-      old_inner_p, new_separator_key, split_sibling, next_separator_key);
-
-  bool cas_success =
-      mapping_table[node].compare_exchange_strong(old_inner_p, new_inner_p);
-  if (cas_success == false) {
-    delete new_inner_p;
-    return install_try_again;
-  }
-
-  return install_success;
 }
 
 template <typename KeyType, typename ValueType, typename KeyComparator>
-typename BWTree<KeyType, ValueType, KeyComparator>::InstallDeltaResult
-BWTree<KeyType, ValueType, KeyComparator>::installIndexTermDeltaDelete(
-    PID node, BWNode* inner_node, PID merge_pid, BWDeltaMergeNode* merge_node) {
-  BWNode* old_inner_p = inner_node;
+void BWTree<KeyType, ValueType, KeyComparator>::installIndexTermDeltaDelete(
+  FindLeafResult& leaf_info) {
 
-  if (isSMO(old_inner_p)) {
-    return install_need_consolidate;
-  }
+  BWDeltaMergeNode* merge_node = static_cast<BWDeltaMergeNode*>(leaf_info.node);
+  PID merge_pid = leaf_info.pid;
 
-  // Check if already installed
-  BWNode* c_node = old_inner_p;
-  while (c_node != nullptr) {
-    switch (c_node->type) {
+  FindLeafResult parent_info = leaf_info;
+  parent_info.pop();
+
+  while (true) {
+    fixSMOForInstall(parent_info);
+
+    PID install_pid = parent_info.pid;
+    BWNode* old_inner_p = parent_info.node;
+
+    // Check if already installed
+    BWNode* c_node = old_inner_p;
+    while (c_node != nullptr) {
+      switch (c_node->type) {
       case deltaIndexTermDelete: {
         BWDeltaIndexTermDeleteNode* delete_node =
-            static_cast<BWDeltaIndexTermDeleteNode*>(c_node);
+          static_cast<BWDeltaIndexTermDeleteNode*>(c_node);
         if (delete_node->node_to_remove == merge_node->node_to_remove) {
-            return install_success;
+          return;
         }
         c_node = delete_node->child_node;
         break;
       }
       case inner: {
-        // Same as split, invariant is that merge nodes always force a
-        // consolidate, so should be at the top
         BWInnerNode* inner_node = static_cast<BWInnerNode*>(c_node);
         bool found = false;
         for (int i = 0; i < inner_node->separators.size(); i++) {
@@ -3225,7 +3127,7 @@ BWTree<KeyType, ValueType, KeyComparator>::installIndexTermDeltaDelete(
           }
         }
         if (!found) {
-          return install_success;
+          return;
         }
         c_node = nullptr;
         break;
@@ -3234,53 +3136,164 @@ BWTree<KeyType, ValueType, KeyComparator>::installIndexTermDeltaDelete(
         BWDeltaNode* delta = static_cast<BWDeltaNode*>(c_node);
         c_node = delta->child_node;
       }
+      }
     }
-  }
-  BWNode* new_inner_p = (BWNode*)new BWDeltaIndexTermDeleteNode(
+
+    idb_assert(merge_pid != merge_node->node_to_remove);
+    BWNode* new_inner_p = (BWNode*)new BWDeltaIndexTermDeleteNode(
       old_inner_p, merge_pid, merge_node->node_to_remove,
       findBounds(merge_node).first, merge_node->separator_key,
       merge_node->next_separator_key);
+    assert(new_inner_p != nullptr);
 
-  bool cas_success =
-      mapping_table[node].compare_exchange_strong(old_inner_p, new_inner_p);
-  if (cas_success == false) {
-    delete new_inner_p;
-    return install_try_again;
+    if (mapping_table[install_pid].compare_exchange_strong(old_inner_p,
+                                                           new_inner_p)) {
+      parent_info.node = new_inner_p;
+      parent_info.push(leaf_info.pid, leaf_info.node);
+      leaf_info = parent_info;
+      return;
+    } else {
+      parent_info.node = mapping_table[parent_info.pid].load();
+      delete new_inner_p;
+    }
   }
-
-  return install_success;
 }
 
-template <typename KeyType, typename ValueType, typename KeyComparator>
-typename BWTree<KeyType, ValueType, KeyComparator>::InstallDeltaResult
-BWTree<KeyType, ValueType, KeyComparator>::installDeltaMerge(
-    PID pid, BWNode* node, PID remove_pid, KeyType remove_lower_bound,
-    BWNode* remove_node, KeyType remove_upper_bound) {
-  BWNode* old_p = node;
+  template <typename KeyType, typename ValueType, typename KeyComparator>
+void BWTree<KeyType, ValueType, KeyComparator>::installDeltaMerge(
+    FindLeafResult& leaf_info) {
+  BWDeltaNode* remove_node = dynamic_cast<BWDeltaNode*>(leaf_info.node);
+  PID remove_pid = leaf_info.pid;
+  KeyType remove_lower_bound;
+  KeyType remove_upper_bound;
+  std::tie(remove_lower_bound, remove_upper_bound) = findBounds(remove_node);
 
-  if (isSMO(old_p)) {
-    if (BWDeltaMergeNode* merge_node = dynamic_cast<BWDeltaMergeNode*>(old_p)) {
-      if (merge_node->node_to_remove == remove_pid) {
-        return install_success;
+  FindLeafResult parent_info = leaf_info;
+  parent_info.pop();
+
+  while (true) {
+    // Handles remove on the parent
+    fixSMOForInstall(parent_info);
+
+    BWNode* c_node = parent_info.node;
+    PID s_pid = NONE_PID;
+    while (c_node != nullptr) {
+      switch (c_node->type) {
+      case PageType::deltaMerge: {
+        BWDeltaMergeNode* merge_delta = static_cast<BWDeltaMergeNode*>(c_node);
+        if (key_greater(remove_lower_bound, merge_delta->separator_key)) {
+          c_node = merge_delta->merge_node;
+        } else {
+          c_node = merge_delta->child_node;
+        }
+        break;
+      }
+      case PageType::deltaSplit: {
+        BWDeltaSplitNode* split_delta = static_cast<BWDeltaSplitNode*>(c_node);
+        // Should be to the left, so never need to go right
+        assert(!key_greater(remove_lower_bound, split_delta->separator_key));
+        c_node = split_delta->child_node;
+        break;
+      }
+      case PageType::deltaIndexTermInsert: {
+        BWDeltaIndexTermInsertNode* insert_delta =
+          static_cast<BWDeltaIndexTermInsertNode*>(c_node);
+        if (key_equal(remove_lower_bound, insert_delta->next_separator_key)) {
+          s_pid = insert_delta->new_split_sibling;
+          c_node = nullptr;
+        } else {
+          c_node = insert_delta->child_node;
+        }
+        break;
+      }
+      case PageType::deltaIndexTermDelete: {
+        BWDeltaIndexTermDeleteNode* delete_delta =
+          static_cast<BWDeltaIndexTermDeleteNode*>(c_node);
+        if (key_equal(remove_lower_bound, delete_delta->remove_node_low_key)) {
+          // Delete is already installed, means merge was installed
+          parent_info.push(
+            delete_delta->node_to_merge_into,
+            mapping_table[delete_delta->node_to_merge_into].load());
+          leaf_info = parent_info;
+          return;
+        } else if (key_equal(remove_lower_bound,
+                             delete_delta->next_separator_key)) {
+          // Merge into node that was just merged into
+          s_pid = delete_delta->node_to_merge_into;
+          c_node = nullptr;
+        } else {
+          c_node = delete_delta->child_node;
+        }
+        break;
+      }
+      case PageType::inner: {
+        BWInnerNode* inner_node = static_cast<BWInnerNode*>(c_node);
+
+        s_pid = inner_node->separators.back().second;
+        for (int i = 1; i < inner_node->separators.size(); i++) {
+          bwt_printf("Inside for loop, i = %d\n", i);
+          if (key_lessequal(remove_lower_bound, inner_node->separators[i].first)) {
+            s_pid = inner_node->separators[i - 1].second;
+            break;
+          }
+        }
+        c_node = nullptr;
+        break;
+      }
+      default:
+        idb_assert(false);
+        printf("type %d, remove on %lu with parent pid %lu\n",
+               c_node->type, remove_pid, parent_info.pid);
+        idb_assert(false);
       }
     }
-    return install_need_consolidate;
+    bwt_printf("s_pid %lu\n", s_pid);
+    idb_assert(s_pid != NONE_PID);
+    idb_assert(s_pid != leaf_info.pid);
+    BWNode* sibling_node = mapping_table[s_pid].load();
+
+    parent_info.push(s_pid, sibling_node);
+
+    // Don't install if already installed
+    if (BWDeltaMergeNode* merge_node =
+        dynamic_cast<BWDeltaMergeNode*>(sibling_node)) {
+      if (merge_node->node_to_remove == remove_pid) {
+        leaf_info = parent_info;
+        return;
+      }
+    }
+
+    fixSMOForInstall(parent_info);
+
+    bwt_printf("s_pid after install %lu\n", parent_info.pid);
+    idb_assert(parent_info.pid != NONE_PID);
+    idb_assert(parent_info.pid != remove_pid);
+
+    if (key_greater(findBounds(parent_info.node).second, remove_lower_bound)) {
+      // Already merged
+      leaf_info = parent_info;
+      return;
+    }
+
+    BWNode* new_p =
+      (BWNode*)new BWDeltaMergeNode(parent_info.node, remove_pid,
+                                    remove_lower_bound,
+                                    remove_node->child_node,
+                                    remove_upper_bound);
+    assert(new_p != nullptr);
+
+    if (mapping_table[parent_info.pid].compare_exchange_strong(parent_info.node,
+                                                               new_p)) {
+      parent_info.node = new_p;
+      leaf_info = parent_info;
+      return;
+    } else {
+      bwt_printf("Failed to install merge... retrying...\n");
+      delete new_p;
+      parent_info.pop();
+      parent_info = findPID(parent_info.pid);
+    }
   }
-
-  BWDeltaNode* delta = dynamic_cast<BWDeltaNode*>(remove_node);
-  assert(delta != nullptr);
-
-  BWNode* new_p =
-      (BWNode*)new BWDeltaMergeNode(old_p, remove_pid, remove_lower_bound,
-                                    delta->child_node, remove_upper_bound);
-
-  bool cas_success = mapping_table[pid].compare_exchange_strong(old_p, new_p);
-  if (cas_success == false) {
-    delete new_p;
-    return install_try_again;
-  }
-
-  return install_success;
 }
 
 template <typename KeyType, typename ValueType, typename KeyComparator>
