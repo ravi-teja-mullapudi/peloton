@@ -18,9 +18,26 @@
 #include "backend/storage/tuple.h"
 
 //#define BWTREE_DEBUG
+#include <random>
 
 namespace peloton {
 namespace test {
+
+
+template <typename Fn, typename... Args>
+void LaunchParallelTestID(uint64_t num_threads, Fn&& fn, Args &&... args) {
+  std::vector<std::thread> thread_group;
+
+  // Launch a group of threads
+  for (uint64_t thread_itr = 0; thread_itr < num_threads; ++thread_itr) {
+    thread_group.push_back(std::thread(fn, thread_itr, args...));
+  }
+
+  // Join the threads with the main thread
+  for (uint64_t thread_itr = 0; thread_itr < num_threads; ++thread_itr) {
+    thread_group[thread_itr].join();
+  }
+}
 
 //===--------------------------------------------------------------------===//
 // Index Tests
@@ -142,7 +159,7 @@ TEST(IndexTests, UniqueKeyTest) {
   // Use another index object to avoid previous result pollute this test
   std::unique_ptr<index::Index> index2(BuildIndex(true));
   // We test the index with this many different keys
-  const int key_list_size = 200;
+  const int key_list_size = 2000;
 
   storage::Tuple **key_list = new storage::Tuple *[key_list_size];
   for (int i = 0; i < key_list_size; i++) {
@@ -493,7 +510,7 @@ TEST(IndexTests, MultiThreadedInsertTest) {
   std::unique_ptr<index::Index> index(BuildIndex());
 
   // Parallel Test
-  size_t num_threads = 40;
+  size_t num_threads = 60;
   size_t scale_factor = 100;
   LaunchParallelTest(num_threads, InsertTest, index.get(), pool, scale_factor);
 
@@ -518,6 +535,75 @@ TEST(IndexTests, MultiThreadedInsertTest) {
   locations = index->ScanKey(key0.get());
   EXPECT_EQ(locations.size(), num_threads);
   EXPECT_EQ(locations[0].block, item0.block);
+
+  delete tuple_schema;
+}
+
+void InsertClear(uint64_t thread_id, index::Index *index, VarlenPool *pool,
+                 std::vector<std::vector<int>> all_keys) {
+  // Loop based on scale factor
+  std::vector<int>& keys = all_keys[thread_id];
+  printf("entering thread %lu\n", thread_id);
+  for (size_t i = 0; i < keys.size(); ++i) {
+    std::unique_ptr<storage::Tuple> key0(new storage::Tuple(key_schema, true));
+    key0->SetValue(0, ValueFactory::GetIntegerValue(keys[i]), pool);
+    key0->SetValue(1, ValueFactory::GetStringValue("a"), pool);
+
+    index->InsertEntry(key0.get(), item0);
+  }
+
+  for (size_t i = 0; i < keys.size(); ++i) {
+    std::unique_ptr<storage::Tuple> key0(new storage::Tuple(key_schema, true));
+    key0->SetValue(0, ValueFactory::GetIntegerValue(keys[keys.size() - i - 1]),
+                   pool);
+    key0->SetValue(1, ValueFactory::GetStringValue("a"), pool);
+
+    index->DeleteEntry(key0.get(), item0);
+  }
+
+  return;
+}
+
+TEST(IndexTestsClear, MultiThreadedClear) {
+  auto pool = TestingHarness::GetInstance().GetTestingPool();
+  std::vector<ItemPointer> locations;
+
+  // INDEX
+  std::unique_ptr<index::Index> index(BuildIndex());
+
+  // Parallel Test
+  int num_threads = 10;
+  int scale_factor = 50;
+
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<> dis(0, num_threads * scale_factor * 10);
+
+  std::vector<std::vector<int>> all_keys;
+  for (int i = 0; i < num_threads; ++i) {
+    std::vector<int> keys;
+    for (int j = 0; j < scale_factor * 10; ++j) {
+      keys.push_back(dis(gen));
+    }
+    all_keys.push_back(keys);
+  }
+
+  LaunchParallelTestID(num_threads, InsertClear, index.get(), pool,
+                       all_keys);
+
+  locations = index->ScanAllKeys();
+  // We enable duplicated-key support, so each insert should exactly
+  // increase key count by 1
+  EXPECT_EQ(locations.size(), 0);
+
+  LaunchParallelTestID(num_threads, InsertClear, index.get(), pool,
+                       all_keys);
+
+  locations = index->ScanAllKeys();
+  // We enable duplicated-key support, so each insert should exactly
+  // increase key count by 1
+  EXPECT_EQ(locations.size(), 0);
+
 
   delete tuple_schema;
 }
